@@ -186,6 +186,41 @@ equal margin nudge preserves the results at their original width is still
 **untested**: three attempts were invalidated by my own bugs, not by the
 approach.
 
+## Taking the results surface over works (2026-09-19)
+
+The winning move came from inspecting the tree in UWPSpy:
+
+```
+TaskbarSearchPage > Grid#RootGrid > Grid#QueryFormulationRoot
+  > QueryFormulationControl#QueryFormulation > Grid
+    > HostedWebView2Control#QueryFormulationHostedWebView2
+      > Grid#WebViewGrid > WebView2Standalone.Controls.WebView2
+```
+
+Setting `Visibility = Collapsed` on `#QueryFormulationHostedWebView2` and
+appending our own `Grid` to its parent `Panel` gives us the whole results area,
+cleanly. A two-column layout rendered full width with no artefacts.
+
+This succeeds precisely because it does **not** ask Microsoft's layout to fit
+into less space -- the web view leaves the layout entirely, so there is no
+breakpoint to trip. Shrinking failed for the opposite reason.
+
+Reversible: flip `Visibility` back and remove our grid.
+
+**The consequence is a product decision, not a technical one.** Owning that
+surface means losing Microsoft's results wholesale -- apps, settings,
+documents and web. A two-column "apps | files" layout therefore has to supply
+the apps column itself; app entries are enumerable from the `AppsFolder` shell
+namespace, with icons and launch verbs. Settings and web results would simply
+be gone unless rebuilt.
+
+So there are two honest products here:
+- **Add to search**: a panel beside the flyout (proven, option A), Microsoft's
+  results untouched.
+- **Replace search**: take the surface over (proven, this section) and supply
+  apps and files ourselves -- faster and local, but you own the whole
+  experience.
+
 ## Traps found the hard way
 
 - **The page-add callback fires before layout.** At `TaskbarSearchPage` add
