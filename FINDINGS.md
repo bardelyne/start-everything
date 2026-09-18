@@ -125,11 +125,39 @@ So **option B is fully viable**, with nothing left assumed. Note the receiving
 window must be a real top-level window, not `HWND_MESSAGE` -- message-only
 windows are not findable from another process.
 
+## Plan B proven end to end (2026-09-19)
+
+A paint-test mod constructed a `Border`, a `SolidColorBrush` and a `TextBlock`
+**inside the Low-IL AppContainer** and appended them to Microsoft's own
+`Grid#RootGrid` under `Cortana.UI.Views.TaskbarSearchPage`:
+
+```
+InjectWindhawkTAP (attempt 1) -> 00000000
+TaskbarSearchPage added - attempting to inject a visible element
+found Grid#RootGrid
+SUCCESS: element appended to RootGrid
+```
+
+and the element **rendered on screen**. So XAML construction and rendering
+work in the sandbox; only reaching *out* is blocked, which is what the
+`WM_COPYDATA` push solves. Nothing in plan B is assumed any more.
+
+Note the TAP must be deferred until a XAML window exists -- calling it earlier
+returns `ERROR_NOT_FOUND` (`0x80070490`). This is the same trap as in the
+per-monitor-brightness mod, and it bites whenever the host has just restarted,
+which installing a mod causes.
+
+**Plan C is closed, measured.** A hook on `DwmSetWindowAttribute` inside
+`StartMenuExperienceHost` logged **no** `DWMWA_CLOAK` call while Start opened
+and handed off to search. The cloak is applied from outside the process, so a
+mod injected there cannot intercept it.
+
 ## Open questions
 
 1. Do the search results render in XAML or in the `HostedWebView2Control`
    seen in the idle tree? Only the idle page was captured; the tree with
-   results showing was never dumped.
+   results showing was never dumped. This decides whether the apps-|-files
+   split is cheap or expensive -- not whether it is possible.
 2. Is there an existing right-hand pane in the results layout that could be
    filled, instead of splitting the content area ourselves?
 
