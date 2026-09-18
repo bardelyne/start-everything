@@ -383,3 +383,86 @@ broker over-fetches and reorders.
 - Keep the enumerated PIDL. Re-parsing the display name fails for the
   GUID-relative entries; going through the item identity produced icons for
   187 of 187.
+
+## The panel mod
+
+`everything-search.wh.cpp` renders the two columns inside `SearchHost`, and
+`broker/panel_push.exe` feeds it real data from the command line. Both halves
+verified end to end on a live search flyout.
+
+### Take over late, not early
+
+The mod finds the web view host and builds its panel when the page is first
+laid out, but leaves the stock results **visible** until the first batch of
+rows actually arrives. Without a broker running, search behaves exactly as
+Windows shipped it.
+
+This was worth doing for its own sake, and it also paid for itself during
+development: every reinstall, restart and crash left the machine with working
+search instead of an empty panel.
+
+### The reply channel: a return value, truncated to 32 bits
+
+The panel cannot send anything upward -- `WM_COPYDATA` from low to normal
+integrity is dropped. It answers by returning a value from its window
+procedure instead, which is the result of the broker's own call rather than a
+message of its own, and does cross back.
+
+**But the return value is truncated to 32 bits.** The panel returned
+`0x4000000100010002`; the broker received `0x00010002`, exactly the low half.
+The first encoding put the validity bit at 62 and the sequence number at
+32..47, so every part of it that mattered was silently discarded and the
+click looked like it had never happened. Repacked into 32 bits: validity at
+bit 31, 15-bit sequence, 4-bit kind, 12-bit index.
+
+It also comes back **sign-extended** -- the working value arrived as
+`0xFFFFFFFF80011002` -- so the decode masks to 32 bits before testing the
+validity bit.
+
+Diagnosing this needed logging on both sides at once. The panel's log proved
+it had produced the right value; only the broker's log showed what arrived.
+Either alone would have pointed at the wrong half.
+
+### Stale listener windows are dangerous, not merely untidy
+
+Teardown has to run on the XAML thread, and `Wh_ModUninit` frequently does
+not. The old behaviour -- log "wrong thread" and give up -- leaves the panel
+in the tree *and* leaves a top-level window whose window procedure points
+into an image Windhawk is about to unload.
+
+The next broker to call `FindWindow` gets that corpse. A `SendMessage` to it
+blocked for 3.9 s and then took `SearchHost` down.
+
+Two fixes, both needed:
+
+- The mod now marshals teardown by sending a private message to its own
+  listener window, which belongs to the XAML thread. That is a synchronous
+  hop onto the only thread allowed to touch the tree or destroy the window.
+  `SendMessageTimeout` with `SMTO_ABORTIFHUNG`, because a hung XAML thread
+  must not hang the unload -- leaving the panel behind beats deadlocking the
+  shell. Verified: "handed the results surface back / removed the panel /
+  teardown marshalled to the XAML thread: done".
+- The broker never uses a bare `SendMessage`. Every call is
+  `SendMessageTimeout`, so a window left behind by an earlier build fails the
+  call instead of hanging the broker.
+
+### Measured
+
+| | |
+|---|---|
+| push, 12 file rows + icons, 51.7 KB | 1.8 ms |
+| click to action collected | one poll interval |
+| panel build (first layout) | web view host 832x805 |
+
+Icons travel as raw BGRA in the same message -- the panel has no way to fetch
+one. 32x32 is 4 KB per row, and per-extension caching means a page of results
+usually needs two or three distinct icons, not twelve.
+
+### Still open
+
+- The apps column keeps its share of the width even when it has no rows; it
+  should collapse and give the space to files.
+- Keyboard navigation. Rows are buttons, so they tab, but there is no
+  up/down-arrow behaviour and no default selection.
+- The broker still takes its query from the command line. Reading it out of
+  the search box is the one piece missing before this runs by itself.
