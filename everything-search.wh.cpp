@@ -60,6 +60,18 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 - rowHeight: 40
   $name: Row height
   $description: Height of one result row, in pixels.
+- suppressWebResults: false
+  $name: Stop the web results engine from starting
+  $description: >-
+    Windows starts a WebView2 browser inside the search host to render its
+    results and suggestions, and keeps it running whether or not you search.
+    Measured on one machine: six processes and about 390 MB, spawned at
+    startup. Turning off web search in Settings or by policy does not prevent
+    it. This blocks it from launching at all.
+
+    Only turn this on if you run the broker, because it also removes the
+    stock results this mod would otherwise fall back to. It takes effect the
+    next time the search host starts.
 */
 // ==/WindhawkModSettings==
 
@@ -92,7 +104,9 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 #include <roapi.h>
 #include <windhawk_utils.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cwctype>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -222,6 +236,7 @@ struct Settings {
     int filesColumnPercent = 58;
     bool showIcons = true;
     int rowHeight = 40;
+    bool suppressWebResults = false;
 };
 
 Settings g_settings;
@@ -238,6 +253,73 @@ void LoadSettings() {
     if (g_settings.rowHeight < 24 || g_settings.rowHeight > 96) {
         g_settings.rowHeight = 40;
     }
+    g_settings.suppressWebResults =
+        Wh_GetIntSetting(L"suppressWebResults") != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Keeping the web results engine from starting
+//
+// The search host launches a WebView2 browser to draw its results and its
+// suggestions, and does it at startup rather than on the first search, so the
+// cost is paid whether or not anyone searches. Every supported way of turning
+// web search off leaves it running: on the machine this was written on,
+// DisableSearchBoxSuggestions, DisableWebSearch, ConnectedSearchUseWeb,
+// BingSearchEnabled and AllowCortana were all already set against it, and
+// there were still six processes and 390 MB. The suggestions it serves are
+// not only web ones either -- with Bing disabled it was still completing
+// typed text to locally installed app names, which is actively wrong once
+// this panel is answering instead.
+//
+// Killing it does not work: the host notices and respawns it within a second.
+// It does survive losing it, though, which is what makes refusing the launch
+// worth trying at all.
+//
+// CreateProcessW rather than the WebView2 entry point: that lives in
+// EmbeddedBrowserWebView.dll, which is loaded lazily out of the Edge runtime
+// folder and is not present yet when this mod initialises. kernel32 always
+// is. Only the browser process is launched by the host -- the other five are
+// its own children -- so refusing this one call is enough.
+
+std::atomic<int> g_blockedLaunches{0};
+
+using CreateProcessW_t = decltype(&CreateProcessW);
+CreateProcessW_t CreateProcessW_Original;
+
+bool NamesWebView(LPCWSTR text) {
+    if (!text) {
+        return false;
+    }
+    std::wstring lower(text);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+    return lower.find(L"msedgewebview2.exe") != std::wstring::npos;
+}
+
+BOOL WINAPI CreateProcessW_Hook(LPCWSTR applicationName, LPWSTR commandLine,
+                                LPSECURITY_ATTRIBUTES processAttributes,
+                                LPSECURITY_ATTRIBUTES threadAttributes,
+                                BOOL inheritHandles, DWORD creationFlags,
+                                LPVOID environment, LPCWSTR currentDirectory,
+                                LPSTARTUPINFOW startupInfo,
+                                LPPROCESS_INFORMATION processInformation) {
+    if (g_settings.suppressWebResults &&
+        (NamesWebView(applicationName) || NamesWebView(commandLine))) {
+        int n = ++g_blockedLaunches;
+        // Only the first few, and then powers of two. If the host reacts to a
+        // refused launch by retrying forever this will say so without the log
+        // itself becoming the problem.
+        if (n <= 3 || (n & (n - 1)) == 0) {
+            Rec(L"refused to launch the web view (attempt %d)", n);
+        }
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return CreateProcessW_Original(applicationName, commandLine,
+                                   processAttributes, threadAttributes,
+                                   inheritHandles, creationFlags, environment,
+                                   currentDirectory, startupInfo,
+                                   processInformation);
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +485,10 @@ std::atomic<DWORD> g_xamlThreadId{0};
 [[clang::no_destroy]] wuxc::TextBlock g_filesHeader{nullptr};
 [[clang::no_destroy]] wuxc::TextBlock g_status{nullptr};
 
+[[clang::no_destroy]] wuxc::TextBox g_queryBox{nullptr};
+[[clang::no_destroy]] wuxc::TextBox::TextChanged_revoker g_queryChanged;
+[[clang::no_destroy]] std::wstring g_lastPublished;
+
 bool g_built = false;     // the panel exists in the tree
 bool g_takenOver = false; // the web view is currently collapsed
 HWND g_listener = nullptr;
@@ -442,6 +528,75 @@ wux::DependencyObject FindDescendantByName(wux::DependencyObject const& root,
         }
     }
     return nullptr;
+}
+
+// Type plus x:Name, for log lines that have to be matched against what a
+// tree inspector shows.
+std::wstring ElementLabel(wux::DependencyObject const& obj) {
+    std::wstring label;
+    try {
+        label = winrt::get_class_name(obj);
+    } catch (...) {
+        label = L"<unknown>";
+    }
+    if (auto fe = obj.try_as<wux::FrameworkElement>()) {
+        std::wstring name{fe.Name()};
+        if (!name.empty()) {
+            label += L"#" + name;
+        }
+    }
+    return label;
+}
+
+// The first TextBox under the page. Looked up by type rather than by name
+// because the name is not documented anywhere and would be one more thing to
+// break on a servicing update; there is only one text field on the search
+// page, and if that ever stops being true this logs what it found.
+wuxc::TextBox FindQueryBox(wux::DependencyObject const& root, int maxDepth) {
+    if (maxDepth < 0) {
+        return nullptr;
+    }
+    if (auto box = root.try_as<wuxc::TextBox>()) {
+        return box;
+    }
+    int count = wuxm::VisualTreeHelper::GetChildrenCount(root);
+    for (int i = 0; i < count; ++i) {
+        auto child = wuxm::VisualTreeHelper::GetChild(root, i);
+        if (auto found = FindQueryBox(child, maxDepth - 1)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+// What the user actually typed, which is not always what the box contains.
+// When something completes the text inline it appends the completion and
+// leaves it selected, so the typed prefix is everything before the selection
+// starts. Reading Text alone turns "n" into "nVIDIA App" and sends the broker
+// off searching for the wrong thing.
+std::wstring TypedText(wuxc::TextBox const& box) {
+    std::wstring text{box.Text()};
+    int start = box.SelectionStart();
+    int length = box.SelectionLength();
+    if (length > 0 && start >= 0 &&
+        static_cast<size_t>(start) <= text.size() &&
+        static_cast<size_t>(start) + length == text.size()) {
+        text.resize(static_cast<size_t>(start));
+    }
+    return text;
+}
+
+// The panel cannot send the query anywhere: messages from here to a normal
+// integrity process are dropped. So it puts the query in its own window
+// title instead. Window text is stored by the window manager and can be read
+// across processes with GetWindowText, which is a read rather than a message
+// and is not what UIPI restricts. FindWindow still finds the window because
+// the broker matches on class and ignores the title.
+void PublishQuery(const std::wstring& query) {
+    if (!g_listener) {
+        return;
+    }
+    SetWindowTextW(g_listener, query.c_str());
 }
 
 bool XamlWindowExists() {
@@ -820,6 +975,40 @@ void DestroyListener() {
     }
 }
 
+void AttachQueryBox(wux::FrameworkElement const& page) {
+    auto box = FindQueryBox(page, 20);
+    if (!box) {
+        Rec(L"no TextBox on the search page; the query cannot be read");
+        return;
+    }
+    g_queryBox = box;
+    Rec(L"query box found: %ls", ElementLabel(box).c_str());
+
+    g_queryChanged = box.TextChanged(
+        winrt::auto_revoke,
+        [](wf::IInspectable const& sender, wuxc::TextChangedEventArgs const&) {
+            try {
+                auto tb = sender.try_as<wuxc::TextBox>();
+                if (!tb) {
+                    return;
+                }
+                std::wstring typed = TypedText(tb);
+                if (typed == g_lastPublished) {
+                    return;
+                }
+                g_lastPublished = typed;
+                PublishQuery(typed);
+            } catch (...) {
+                // A failure here must not take the search box down with it.
+            }
+        });
+
+    // Publish whatever is already in the box, so a broker that starts late
+    // does not sit waiting for the next keystroke.
+    g_lastPublished = TypedText(box);
+    PublishQuery(g_lastPublished);
+}
+
 void RemoveInjection() {
     try {
         HandBack();
@@ -842,6 +1031,9 @@ void RemoveInjection() {
     g_filesHeader = nullptr;
     g_status = nullptr;
     g_webHost = nullptr;
+    g_queryChanged.revoke();
+    g_queryBox = nullptr;
+    g_lastPublished.clear();
     g_built = false;
     g_takenOver = false;
 }
@@ -953,6 +1145,7 @@ class VisualTreeWatcher
                 try {
                     g_webHost = host;
                     if (BuildPanel(parent) && CreateListener()) {
+                        AttachQueryBox(pageRef);
                         Rec(L"ready: panel built, waiting for the broker "
                             L"(host %.0fx%.0f)",
                             host.ActualWidth(), host.ActualHeight());
@@ -1126,6 +1319,15 @@ std::atomic<bool> g_tapQuit{false};
 BOOL Wh_ModInit() {
     Wh_Log(L">");
     LoadSettings();
+
+    // Installed unconditionally so that toggling the setting does not need a
+    // reinstall; the hook checks the setting on every call and is a string
+    // compare when it is off.
+    if (!WindhawkUtils::SetFunctionHook(&CreateProcessW,
+                                            CreateProcessW_Hook,
+                                            &CreateProcessW_Original)) {
+        Rec(L"could not hook CreateProcessW; the web view cannot be stopped");
+    }
     // Nothing else here on purpose. Wh_ModInit runs before the host finishes
     // starting, and the first COM activation in a process fixes its security
     // settings process-wide -- doing that from here makes the host's own

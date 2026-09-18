@@ -466,3 +466,57 @@ usually needs two or three distinct icons, not twelve.
   up/down-arrow behaviour and no default selection.
 - The broker still takes its query from the command line. Reading it out of
   the search box is the one piece missing before this runs by itself.
+
+## The web results engine
+
+`SearchHost` launches a WebView2 browser to draw its results *and* its
+suggestions, and launches it **at startup**, in the same second as the host --
+not lazily on the first search. Measured: six processes, 390 MB, 0% CPU when
+idle. So the cost is paid whether or not anyone ever searches.
+
+- **Collapsing the XAML host does not touch it.** `Visibility::Collapsed`
+  stops XAML drawing the element and nothing else. The browser stays up, keeps
+  being fed the query, and keeps completing typed text.
+- **Every supported policy was already set and made no difference.** On this
+  machine `DisableSearchBoxSuggestions`, `DisableWebSearch`,
+  `ConnectedSearchUseWeb=0`, `BingSearchEnabled=0` and `AllowCortana=0` were
+  all in place, and the web view still ran. The suggestions are not only web
+  ones: with Bing off it still completed `n` to `nVIDIA App`, a locally
+  installed app. The web view owns the whole suggestion surface.
+- **Killing it is futile; refusing it is not.** Killing the browser process
+  respawned the whole tree within a second, but the host itself survived
+  untouched -- which is what made blocking the launch worth trying.
+- **Hooking `CreateProcessW` works.** Six processes to zero, and only two
+  refusals at startup before the host gave up: no retry storm. The WebView2
+  entry point `CreateWebViewEnvironmentWithOptionsInternal` in
+  `EmbeddedBrowserWebView.dll` would be more surgical, but that DLL is loaded
+  lazily from the Edge runtime folder and does not exist yet at `Wh_ModInit`;
+  kernel32 always does. Only the browser process is launched by the host --
+  the other five are its children -- so one refusal is enough.
+
+Shipped off by default, because it also removes the stock results this mod
+otherwise falls back to. It only makes sense with a broker running.
+
+## Reading the query
+
+The panel is inside the search host and can read the search box straight out
+of the XAML tree, which beats driving UI Automation in from outside.
+
+- **Read the typed prefix, not `Text`.** Inline completion appends its guess
+  and leaves it selected, so `Text` says `nVIDIA App` when one character was
+  typed. The typed prefix is everything before the selection starts. Without
+  this the broker searches for a word the user never wrote -- and it matters
+  even with the web view suppressed, since any future completion source would
+  do the same.
+- **Publish it through the window title.** The panel cannot send the query
+  anywhere, but `SetWindowText` on its own window is readable from the broker
+  with `GetWindowText`: a read of window state rather than a message, so UIPI
+  does not apply. `FindWindow` still finds the window because the broker
+  matches on class and passes no title.
+- The box is found by type (first `TextBox` under the page) rather than by
+  name, since the name is undocumented and is one more thing to break on a
+  servicing update.
+
+**The broker must not run elevated.** It launches whatever the user clicks, so
+an elevated broker silently runs every app as administrator. Nothing enforces
+this yet; it is a property of how the process is started.
