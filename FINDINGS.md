@@ -152,14 +152,59 @@ which installing a mod causes.
 and handed off to search. The cloak is applied from outside the process, so a
 mod injected there cannot intercept it.
 
+## The results are web content, not XAML (2026-09-19)
+
+763 elements were logged as the search page built itself while typing. There
+is **no `ListView`, no `ItemsRepeater`, no `ListViewItem`** anywhere. The only
+content-bearing element is:
+
+```
+Cortana.UI.Views.HostedWebView2Control  #QueryFormulationHostedWebView2  832x660
+Windows.UI.Xaml.Controls.Grid           #WebViewGrid                     832x660
+```
+
+The flyout is 858x890; the search box takes the top strip and the web view
+fills everything below. So "Best match", the result rows, and the details pane
+with Open / Open file location / Share / Copy path are all **web content**.
+
+Consequences:
+
+- There is no XAML results list to add rows to, and no item template to reuse
+  for free styling. Our panel must be styled by hand.
+- `#WebViewGrid` is an ordinary XAML Grid we *can* move and resize, so a
+  side-by-side layout is still reachable -- but as a hard boundary between
+  their surface and ours, not an interleaving.
+
+**Shrinking the web view does not work.** Pushing its right edge in by 330px
+made the web content hit a responsive breakpoint: it dropped its results list
+entirely and showed only the details pane. Losing Microsoft's results defeats
+the point of adding to search rather than replacing it.
+
+**Widening the flyout window is permitted** -- `SetWindowPos` on the
+`CoreWindow` succeeded and the new width stuck. Whether widening *plus* an
+equal margin nudge preserves the results at their original width is still
+**untested**: three attempts were invalidated by my own bugs, not by the
+approach.
+
+## Traps found the hard way
+
+- **The page-add callback fires before layout.** At `TaskbarSearchPage` add
+  time, `WebViewGrid` measures `0x0` and the window is still at some default
+  size. Anything that measures or resizes must wait for layout --
+  `SizeChanged`/`LayoutUpdated` on the page, not the tree-change callback.
+- **Teardown must marshal to the XAML thread.** A mod whose uninit runs on
+  another thread and therefore skips cleanup leaves its elements and its
+  layout changes in the shell's tree. They survive the mod being unregistered,
+  pollute the baseline for the next run, and stack up visibly.
+- **Restart the host between experiments.** The tree is only truly clean after
+  `SearchHost` restarts.
+
 ## Open questions
 
-1. Do the search results render in XAML or in the `HostedWebView2Control`
-   seen in the idle tree? Only the idle page was captured; the tree with
-   results showing was never dumped. This decides whether the apps-|-files
-   split is cheap or expensive -- not whether it is possible.
-2. Is there an existing right-hand pane in the results layout that could be
-   filled, instead of splitting the content area ourselves?
+1. Does widening the flyout while holding the web view at its original width
+   preserve the results list? (the three invalid runs above)
+2. Can the widened flyout be positioned sensibly on narrower screens, where
+   858 + panel would not fit to the right?
 
 ## Design notes
 
