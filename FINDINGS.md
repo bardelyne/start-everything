@@ -297,3 +297,89 @@ Note the apps enumeration must live in the **broker**, not the panel:
   stagger reads as intentional; a near-miss sync reads as broken.
 - Dismissal matters more than entrance. A panel that lingers after the flyout
   is gone looks broken in a way a late entrance never does.
+
+## Everything IPC (broker, files column)
+
+Everything 1.4.1.1032, queried through its hidden `EVERYTHING_TASKBAR_NOTIFICATION`
+window with `WM_COPYDATA`. No SDK DLL and no HTTP server: the IPC window is
+present whenever Everything runs, the other two are not.
+
+- **UIPI silently eats the reply when the broker is elevated.** The query is
+  accepted (`SendMessage` returns 1), Everything runs the search, and then
+  sends the results *up* to a higher-integrity window, which Windows drops
+  without telling either side. It is indistinguishable from a timeout, and it
+  cost most of an evening spent suspecting the struct layout instead.
+  `ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, nullptr)` on
+  the reply window fixes it outright: zero replies in 2 s before, ~30 ms
+  after. Everything runs at medium, so this only bites an elevated broker —
+  but it will bite anyone testing from an admin shell.
+- **The struct layouts were never wrong.** Checked against the official
+  `everything_ipc.h`: `QUERYW`, `LISTW` and `ITEMW` matched what had been
+  written from memory, field for field. The failure was entirely the integrity
+  level.
+- **`QUERY2` (message 18) is worth using over `QUERYW` (message 2).** It adds a
+  sort order and returns size, dates, attributes and run count. Everything
+  answers `FALSE` if it does not support it, so the fallback is free to keep.
+- **The documented `QUERY2` field order disagrees with the flag bit order** —
+  the header lists `SIZE` before `EXTENSION` while `EXTENSION` is the lower
+  bit. The subset actually used (name, path, size, date-modified, attributes,
+  run count) is ordered identically either way; that was confirmed against a
+  live reply by hex dump and by checking that item strides closed exactly
+  (376 bytes = 60 name + 292 path + 24 fixed). Anything outside that subset
+  needs the same check before it is read.
+
+### Latency
+
+Best of 3, milliseconds, by pool size:
+
+| query | matches | 8 | 50 | 200 | 300 | 500 | 1000 |
+|---|---|---|---|---|---|---|---|
+| `c` | 589945 | 11.3 | 11.7 | 16.6 | 48.6 | 65.7 | 145.6 |
+| `code` | 8365 | 30.1 | 28.4 | 32.8 | 39.3 | 44.3 | 51.4 |
+| `readme` | 2434 | 29.6 | 28.0 | 32.8 | 37.6 | 39.2 | 50.3 |
+| no matches | 0 | 22.6 | 23.0 | 23.5 | 27.1 | 24.6 | 25.2 |
+
+- **The first version of this table was measuring my own code.** Waiting for
+  the reply with a `Sleep(1)` poll loop put a floor under every query at the
+  15.6 ms system timer tick, so the numbers came out quantised at 15 / 30 / 45
+  and a query with *zero* matches cost 30 ms. `MsgWaitForMultipleObjectsEx`
+  with `QS_ALLINPUT` removed it. Worth remembering before trusting any
+  latency number measured through a polling wait.
+- ~23 ms is a fixed cost inside Everything that no pool size avoids.
+- A pool of 200 stays near that floor for every query including a single
+  letter; 300 already costs 48 ms on `c`.
+
+### Ranking
+
+Everything only guarantees name-ascending is instant — every other sort
+depends on a fast-sort the user may not have enabled. Name-ascending is not a
+presentation order (`code` leads with `-abstract-code-quality-task`), so the
+broker over-fetches and reorders.
+
+- **A weighted sum was the wrong shape.** Adding recency and run-count bonuses
+  to a match score left thousands of results tied, and the top eight for
+  `code` were eight unrelated folders all named "Code". A lexicographic key —
+  match class, then run count, then modified time — makes the tie-breaks total
+  and explicit.
+- **Path-based demotion matters more than any scoring tweak.** Sending
+  `node_modules`, `.gradle`, `WinSxS`, `site-packages` and friends below every
+  other match class is what turns `brightness` from three WinSxS manifests
+  into `brightness_engine.h`.
+- **Everything's run count is sparse** — it only counts opens made through
+  Everything itself. Zero for essentially everything on this machine, so it is
+  currently doing nothing. Kept because when it is set it is the best evidence
+  available, but it should not be relied on.
+- **Open limitation:** the pool is the alphabetically first N matches, so
+  ranking only reorders what that window caught. A recently edited file whose
+  name sorts late never enters it. The fix needs a server-side
+  date-modified-descending sort, which is fast only with the matching
+  fast-sort enabled. Undecided: keep as is, or probe the date sort's cost once
+  at startup and use it when cheap.
+
+### Apps column
+
+- `shell:AppsFolder` enumerates 187 apps in ~230 ms, names and identities
+  only. Icons cost ~40–220 ms each, so they stay lazy and per visible row.
+- Keep the enumerated PIDL. Re-parsing the display name fails for the
+  GUID-relative entries; going through the item identity produced icons for
+  187 of 187.
