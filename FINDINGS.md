@@ -221,6 +221,51 @@ So there are two honest products here:
   apps and files ourselves -- faster and local, but you own the whole
   experience.
 
+## The apps column: shell:AppsFolder (2026-09-19)
+
+`shell:AppsFolder` is the virtual folder that unions Win32 shortcuts and Store
+apps. Measured on this machine:
+
+- **187 apps** enumerated -- 26 Store/UWP, 161 classic
+- Each carries a display name and a launchable identifier
+- Substring matching works well: `note` finds Notepad, `term` finds Terminal,
+  `ste` finds Steam and SteelSeries
+
+Identifiers come in several shapes, and this matters:
+
+```
+Brave                                          plain name
+C:\...\ollama app.exe                          full path
+Microsoft.WindowsNotepad_8wekyb3d8bbwe!App     UWP AUMID
+{1AC14E77-...}\msconfig.exe                    known-folder GUID + relative
+http://support.steampowered.com/               URL
+```
+
+**Do not rebuild a path by prefixing `shell:AppsFolder\`** -- the GUID-relative
+ones fail to resolve that way (`0x80070002`). Keep the `IShellItem` from
+enumeration and work from it directly: that gave **187 of 187 icons, zero
+failures**, across every shape.
+
+### Timing dictates the design
+
+| operation | cost |
+|---|---|
+| enumerate names and identifiers | ~200 ms |
+| enumerate + fetch all 187 icons | ~1820 ms (~9.7 ms each) |
+
+Icons are ~90% of the cost, so they cannot be fetched per keystroke. The
+broker should:
+
+1. enumerate names and identifiers once at startup and cache them -- filtering
+   187 entries in memory is then effectively free per keystroke;
+2. fetch icons lazily on a background thread, only for the rows actually
+   shown, cached by identifier, with rows rendering immediately and icons
+   arriving a frame later;
+3. re-enumerate on app install/uninstall via `SHChangeNotify`, not on a timer.
+
+Note the apps enumeration must live in the **broker**, not the panel:
+`SearchHost` is a Low-IL AppContainer with no shell namespace access.
+
 ## Traps found the hard way
 
 - **The page-add callback fires before layout.** At `TaskbarSearchPage` add
