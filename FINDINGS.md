@@ -55,14 +55,12 @@ flyout's own tree, so it shares the animation for free and is only present on
 the search page by construction. A Medium-IL broker reads the query via UIA,
 queries Everything and sends results down via `WM_COPYDATA`. Nothing is
 weakened — this is the permitted direction.
-**Unverified:** whether `WM_COPYDATA` reaches an AppContainer-owned window.
+**Verified** -- `WM_COPYDATA` reaches an AppContainer-owned window. This is
+the chosen architecture.
 
 **C. Inject into `StartMenuExperienceHost`.** Medium IL, no sandbox at all, so
-no broker and no bridge.
-**Unverified:** whether Start's window survives the handoff to `SearchHost`.
-If it is destroyed there is nothing to render into. Four attempts to measure
-this lapsed for want of someone at the keyboard; the reliable way is a recon
-mod that logs its own window lifecycle from inside, so no timing is involved.
+no broker and no bridge. **Ruled out** -- see below: the window survives but is
+cloaked while search is showing.
 
 **D. Suppress the search page and replace it wholesale.** Possible —
 suppression needs no outbound access — but then the mod owns apps, settings,
@@ -87,14 +85,52 @@ depends on `Cortana.UI.*` names is therefore on shakier ground than the
 brightness mod, and should fail safe: if the anchor is missing, inject nothing
 and leave search working normally.
 
+## Resolved since (2026-09-19)
+
+**Neither flyout window is ever destroyed.** Both `StartMenuExperienceHost`
+and `SearchHost` own a permanent `Windows.UI.Core.CoreWindow`, always
+`IsWindowVisible == TRUE`, shown and hidden purely by **DWM cloaking**. Start's
+is `1920x1025 @ 0,0`; search's is `858x890 @ 531,135`. Measured from inside
+Start via a recon mod, three identical cycles:
+
+```
+search cloaked=0   start cloaked=0    <- Win pressed, both uncloak
+search cloaked=0   start cloaked=2    <- typed, Start cloaks
+search cloaked=2   start cloaked=2    <- Esc, both cloak
+```
+
+This kills **option C**: Start's window survives, but it is cloaked exactly
+while the search page is showing, so anything drawn there would be invisible
+at the only moment it matters.
+
+It also gives a precise, durable detector for "the search page is up":
+
+    search window uncloaked AND start window cloaked
+
+via `DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED)`. The handles never go stale
+because the windows are never destroyed. This depends on no XAML names and so
+is immune to the `2607.x` app train. **`IsWindowVisible` is useless here** --
+it is permanently TRUE for both.
+
+**`WM_COPYDATA` crosses into the AppContainer.** A normal-integrity process
+found the sandboxed window with `FindWindow` and sent it a payload, which
+arrived intact:
+
+```
+SendMessage(WM_COPYDATA) returned 1, GetLastError=0
+RECEIVED WM_COPYDATA  76 bytes  text='hello from a normal-integrity process'
+```
+
+So **option B is fully viable**, with nothing left assumed. Note the receiving
+window must be a real top-level window, not `HWND_MESSAGE` -- message-only
+windows are not findable from another process.
+
 ## Open questions
 
-1. Does `StartMenuExperienceHost`'s window survive the handoff? (decides C)
-2. Does `WM_COPYDATA` from Medium IL reach an AppContainer window? (decides B)
-3. Do the search results render in XAML or in the `HostedWebView2Control`
+1. Do the search results render in XAML or in the `HostedWebView2Control`
    seen in the idle tree? Only the idle page was captured; the tree with
    results showing was never dumped.
-4. Is there an existing right-hand pane in the results layout that could be
+2. Is there an existing right-hand pane in the results layout that could be
    filled, instead of splitting the content area ourselves?
 
 ## Design notes
