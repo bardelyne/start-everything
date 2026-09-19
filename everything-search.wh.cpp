@@ -63,10 +63,14 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 - hideHostSearchBox: false
   $name: Hide SearchHost's own search box (experimental)
   $description: >-
-    Collapses Cortana.UI.Views.RichSearchBoxControl inside SearchHost --
-    the whole control, not the text box inside it. Hiding only the inner box
-    leaves clickable chrome behind, and clicking it crashes SearchHost inside
-    its own SearchUx.UI.dll.
+    Makes SearchHost's search box invisible, unclickable and disabled, while
+    leaving it in the layout.
+
+    Collapsing it outright also works, until something in SearchUx.UI reaches
+    for it: the element is then present but unlaid-out and the host
+    dereferences null. Disabling the inner RichEditBox is what actually keeps
+    the keyboard in the Start menu, since an element that cannot take focus
+    cannot receive keystrokes.
 
     Found by hand in UWPSpy: with that box hidden, typing in the Start menu
     stops handing off to SearchHost altogether. If that holds up, the search
@@ -556,6 +560,34 @@ HMODULE GetCurrentModuleHandle() {
         return nullptr;
     }
     return module;
+}
+
+// Every RichSearchBoxControl in the tree, not just the first.
+//
+// Matching by type and taking the first hit reported "already collapsed" on
+// every page while the box stayed visible on screen -- which is what happens
+// when there is more than one instance and the first one found is not the one
+// being used. Doing it by hand in UWPSpy worked because the element being
+// right-clicked is the visible one.
+void CollectSearchBoxControls(wux::DependencyObject const& root, int maxDepth,
+                              std::vector<wux::FrameworkElement>& out) {
+    if (maxDepth < 0) {
+        return;
+    }
+    try {
+        if (std::wstring_view{winrt::get_class_name(root)} ==
+            L"Cortana.UI.Views.RichSearchBoxControl") {
+            if (auto fe = root.try_as<wux::FrameworkElement>()) {
+                out.push_back(fe);
+            }
+        }
+    } catch (...) {
+    }
+    int count = wuxm::VisualTreeHelper::GetChildrenCount(root);
+    for (int i = 0; i < count; ++i) {
+        CollectSearchBoxControls(wuxm::VisualTreeHelper::GetChild(root, i),
+                                 maxDepth - 1, out);
+    }
 }
 
 // Finds a descendant by its runtime class name.
@@ -1295,34 +1327,84 @@ void HideHostSearchBoxWhenReady(wux::FrameworkElement const& page) {
                 }
                 *passes = 0;
 
-                if (auto ctl = known->get()) {
-                    if (ctl.Visibility() == wux::Visibility::Visible) {
-                        ctl.Visibility(wux::Visibility::Collapsed);
-                        Rec(L"host search control re-collapsed");
+
+                // The whole control, not the RichEditBox inside it:
+                // collapsing just the inner box leaves the control visible and
+                // clickable, and clicking it took SearchHost down with
+                // 0xc0000005 inside SearchUx.UI.dll -- its own code, driving a
+                // text box that was no longer laid out.
+                //
+                // And all of them, not the first: there is more than one
+                // instance, and collapsing the first found reported success
+                // while the visible one carried on working.
+                std::vector<wux::FrameworkElement> controls;
+                CollectSearchBoxControls(pageRef, 20, controls);
+
+                static bool listed = false;
+                if (!listed && !controls.empty()) {
+                    listed = true;
+                    Rec(L"found %zu RichSearchBoxControl instance(s):",
+                        controls.size());
+                    for (auto const& c : controls) {
+                        Rec(L"  %ls  %.0fx%.0f  visibility=%d",
+                            ElementLabel(c).c_str(), c.ActualWidth(),
+                            c.ActualHeight(),
+                            static_cast<int>(c.Visibility()));
                     }
-                    return;  // the cheap path, and the common one
                 }
 
-                // The whole control, not the RichEditBox inside it.
+                // Made inert, not collapsed.
                 //
-                // Collapsing just the inner box left the control visible and
-                // still clickable, and clicking it took SearchHost down:
-                // 0xc0000005 inside SearchUx.UI.dll, the host's own code,
-                // driving a text box that was no longer laid out. Hiding the
-                // control removes the thing that can be clicked at all.
-                auto obj = FindDescendantByType(
-                    pageRef, L"Cortana.UI.Views.RichSearchBoxControl", 20);
-                auto ctl = obj ? obj.try_as<wux::FrameworkElement>() : nullptr;
-                if (!ctl) {
-                    return;
+                // Collapsing works right up until something in SearchUx.UI
+                // reaches for the element: it is then in the tree but has no
+                // layout, and the host dereferences null. That crash arrived
+                // twice, from two different elements, and the second time it
+                // was a click on our own box in Start -- because clicking
+                // there activates SearchHost, which then goes looking for its
+                // search box.
+                //
+                // So leave both elements laid out, where the host can find and
+                // measure them, and take away only what we actually need gone:
+                //   - Opacity(0)            nothing to see
+                //   - IsHitTestVisible      nothing to click
+                //   - IsEnabled on the box  nothing to type into
+                //
+                // The last is the one that matters. The inner RichEditBox is
+                // what carries input, and an element that cannot take focus
+                // cannot receive keystrokes -- which is what kept the keyboard
+                // in Start when the box was collapsed, without removing the
+                // element the host expects to exist.
+                int changed = 0;
+
+                if (auto inner = FindQueryBox(pageRef, 20)) {
+                    g_queryBox = inner;
+                    if (inner.IsEnabled() || inner.Opacity() != 0.0) {
+                        inner.IsEnabled(false);
+                        inner.IsTabStop(false);
+                        inner.Opacity(0.0);
+                        inner.IsHitTestVisible(false);
+                        ++changed;
+                        Rec(L"input made inert: %ls",
+                            ElementLabel(inner).c_str());
+                    }
                 }
-                *known = winrt::make_weak(ctl);
-                if (ctl.Visibility() == wux::Visibility::Visible) {
-                    ctl.Visibility(wux::Visibility::Collapsed);
-                    Rec(L"host search control collapsed: %ls",
-                        ElementLabel(ctl).c_str());
-                } else {
-                    Rec(L"host search control already collapsed");
+
+                for (auto const& c : controls) {
+                    if (c.Opacity() != 0.0) {
+                        c.Opacity(0.0);
+                        c.IsHitTestVisible(false);
+                        ++changed;
+                        Rec(L"chrome made inert: %ls (%.0fx%.0f)",
+                            ElementLabel(c).c_str(), c.ActualWidth(),
+                            c.ActualHeight());
+                    }
+                }
+
+                if (changed == 0) {
+                    return;  // nothing to do this pass
+                }
+                if (!controls.empty()) {
+                    *known = winrt::make_weak(controls.front());
                 }
             } catch (...) {
                 token->revoke();
