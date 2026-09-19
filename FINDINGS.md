@@ -575,3 +575,80 @@ silently never built on the other. It now accepts both.
 Related: when the web view is suppressed the host never gets a size, so
 waiting on the host's width meant the panel never built in exactly the
 configuration it is needed for. It waits on the host's parent instead.
+
+## The input lives in Start after all (2026-09-19, later)
+
+**Plan C is not closed.** It was ruled out because Start's window is cloaked
+while the search page shows -- which is true, and irrelevant if the search page
+never shows. Nothing above measured that case, because nothing above tried
+preventing the handoff.
+
+Found by hand in UWPSpy, then reproduced in a mod and measured.
+
+### The Start menu has never had a search box
+
+`StartMenu.SearchBoxToggleButton` is a **Button**, not an input:
+
+```
+Grid  [772x64]
+  StartMenu.SearchBoxToggleButton  [768x32]
+    Grid [768x32]
+      Border#BorderElement [768x32]
+      Image#SearchIconOff / #SearchIconOn [16x16]
+      ContentPresenter [722x19]
+        TextBlock#PlaceholderText [254x19]
+      Rectangle#TextCaret [1x19]
+```
+
+A placeholder TextBlock and a rectangle drawn to look like a caret. The box a
+user types into has always been SearchHost's `RichSearchBoxControl`,
+composited over the menu. That is why hiding it leaves nothing to type into,
+and why "replace Start's box" means supplying one rather than swapping one.
+
+### SearchHost owns the keyboard while Start is on screen
+
+Foreground traces, real hardware input, `[Win]` then a pause then letters:
+
+| SearchHost's box | Win press | while typing |
+|---|---|---|
+| untouched | SearchHost at +50ms | SearchHost |
+| collapsed | SearchHost at +110ms, Start at +170ms | **Start** |
+
+So collapsing `Cortana.UI.Views.RichSearchBoxControl` is not cosmetic: it is
+what hands the keyboard to `StartMenuExperienceHost`. Without it a TextBox in
+Start cannot receive input at all -- focus can be set on it, and it is lost
+again within a frame, because Start's window is not the keyboard owner.
+
+**Collapse the control, never the RichEditBox inside it.** Hiding
+`CortanaRichSearchBox#SearchTextBox` leaves the control visible and clickable,
+and clicking it takes SearchHost down: `0xc0000005` in `SearchUx.UI.dll`, the
+host's own code, driving a text box that is no longer laid out.
+
+### What now works
+
+A TextBox of ours, placed in the `Grid [772x64]` cell the decoy occupies, with
+the decoy collapsed and SearchHost's control collapsed: typing goes into our
+box, stays in Start, and never reaches SearchHost. Verified by use.
+
+### Why this is worth a rewrite
+
+`StartMenuExperienceHost` is medium integrity and **not** an AppContainer. The
+entire broker architecture exists because `SearchHost` is a low-IL sandbox that
+cannot reach Everything. In Start, none of it is needed:
+
+| | plan B (SearchHost) | plan C (Start) |
+|---|---|---|
+| reaching Everything | impossible in-process; needs a broker | direct |
+| moving results in | `WM_COPYDATA`, packed payloads | none |
+| click back-channel | return value, truncated to 32 bits | none |
+| broker elevation | hazard: it launches what you click | no broker |
+
+### Still unknown
+
+- SearchHost may still run its own query even with its box hidden: it captures
+  keystrokes at the window, not through the box -- typing with no visible
+  search bar still searches. Hiding the box hides the evidence, not the work.
+- Nothing renders results in Start yet. Where they go, and what happens to the
+  app list beneath, is unexamined.
+- Backspace, Esc and keyboard navigation are untouched and probably wrong.
+- The decoy is collapsed, not restored on unload.

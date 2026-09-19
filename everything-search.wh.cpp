@@ -60,6 +60,33 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 - rowHeight: 40
   $name: Row height
   $description: Height of one result row, in pixels.
+- hideHostSearchBox: false
+  $name: Hide SearchHost's own search box (experimental)
+  $description: >-
+    Collapses Cortana.UI.Views.RichSearchBoxControl inside SearchHost --
+    the whole control, not the text box inside it. Hiding only the inner box
+    leaves clickable chrome behind, and clicking it crashes SearchHost inside
+    its own SearchUx.UI.dll.
+
+    Found by hand in UWPSpy: with that box hidden, typing in the Start menu
+    stops handing off to SearchHost altogether. If that holds up, the search
+    page never opens, SearchHost never runs a query, and Start is never
+    cloaked -- which would make it possible to put the results in Start
+    itself, a process that is not sandboxed and could reach Everything
+    without a broker at all.
+
+    This exists to measure that claim. Off by default.
+- ownInputProbe: false
+  $name: Own-input probe (experimental)
+  $description: >-
+    Adds a text box of our own to the search page, takes keyboard focus, and
+    logs who the keystrokes actually reach.
+
+    This answers one question: if we own the input, Microsoft's box never sees
+    a keystroke, so it never completes what you type, never fires TextChanged
+    twice per key, and never runs its own query. That would remove a whole
+    class of problems rather than working around them. It is only worth
+    building if focus can be taken and kept, which is what this measures.
 - stripAutoComplete: false
   $name: Erase the box's guess as you type (experimental)
   $description: >-
@@ -119,6 +146,7 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cwctype>
 #include <memory>
 #include <string>
@@ -250,6 +278,8 @@ struct Settings {
     bool showIcons = true;
     int rowHeight = 40;
     bool stripAutoComplete = true;
+    bool ownInputProbe = false;
+    bool hideHostSearchBox = false;
     bool suppressWebResults = false;
 };
 
@@ -268,6 +298,9 @@ void LoadSettings() {
         g_settings.rowHeight = 40;
     }
     g_settings.stripAutoComplete = Wh_GetIntSetting(L"stripAutoComplete") != 0;
+    g_settings.ownInputProbe = Wh_GetIntSetting(L"ownInputProbe") != 0;
+    g_settings.hideHostSearchBox =
+        Wh_GetIntSetting(L"hideHostSearchBox") != 0;
     g_settings.suppressWebResults =
         Wh_GetIntSetting(L"suppressWebResults") != 0;
 }
@@ -523,6 +556,33 @@ HMODULE GetCurrentModuleHandle() {
         return nullptr;
     }
     return module;
+}
+
+// Finds a descendant by its runtime class name.
+//
+// Needed because the thing that has to be collapsed is identified by type
+// (Cortana.UI.Views.RichSearchBoxControl) rather than by x:Name, and the only
+// search that existed here matched names.
+wux::DependencyObject FindDescendantByType(wux::DependencyObject const& root,
+                                           std::wstring_view type,
+                                           int maxDepth) {
+    if (maxDepth < 0) {
+        return nullptr;
+    }
+    try {
+        if (std::wstring_view{winrt::get_class_name(root)} == type) {
+            return root;
+        }
+    } catch (...) {
+    }
+    int count = wuxm::VisualTreeHelper::GetChildrenCount(root);
+    for (int i = 0; i < count; ++i) {
+        if (auto found = FindDescendantByType(
+                wuxm::VisualTreeHelper::GetChild(root, i), type, maxDepth - 1)) {
+            return found;
+        }
+    }
+    return nullptr;
 }
 
 wux::DependencyObject FindDescendantByName(wux::DependencyObject const& root,
@@ -1077,6 +1137,199 @@ void DestroyListener() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Own-input probe
+//
+// The box on the search page is Microsoft's, and it behaves in ways we spend
+// effort undoing: it completes what you type, it raises TextChanged twice per
+// key, and when its completion happens to be right the remaining keystrokes
+// change nothing at all -- so typing "notepad" published "note" and the broker
+// searched for a prefix of what was asked for.
+//
+// None of that needs working around if the keystrokes never reach that box.
+// This puts a box of ours on the page and reports, in order: whether focus can
+// be taken, whether it is kept, and what each box contains as keys arrive. If
+// ours fills while Microsoft's stays empty, owning the input is viable.
+[[clang::no_destroy]] wuxc::TextBox g_probeBox{nullptr};
+[[clang::no_destroy]] wuxc::TextBox::TextChanged_revoker g_probeChanged;
+[[clang::no_destroy]] wux::UIElement::LostFocus_revoker g_probeLost;
+[[clang::no_destroy]] wux::UIElement::GotFocus_revoker g_probeGot;
+[[clang::no_destroy]] wux::DispatcherTimer g_probeTimer{nullptr};
+
+std::wstring FocusedElementLabel() {
+    try {
+        auto focused = wux::Input::FocusManager::GetFocusedElement();
+        if (!focused) {
+            return L"(nothing)";
+        }
+        if (auto dobj = focused.try_as<wux::DependencyObject>()) {
+            return ElementLabel(dobj);
+        }
+        return std::wstring{winrt::get_class_name(focused)};
+    } catch (...) {
+        return L"(threw)";
+    }
+}
+
+// Why this runs at page-layout time rather than at panel-build time.
+//
+// The panel waits for the web view host to have a size, and that does not
+// happen until a search is actually under way. Measured in one run: the page
+// was laid out at :01.2, the host got a size at :05.2, and the first keystroke
+// arrived at about :05.6. Attaching at :05.2 meant the first character always
+// went to Microsoft's box, which then completed it and ran its own query.
+//
+// The page itself is ready four seconds earlier, which is the whole margin we
+// need: attach there, take focus, and its box never sees a character at all.
+// An empty box is the thing we actually want -- with nothing in it there is no
+// query to run and nothing to complete, and none of that required finding or
+// hooking their search code.
+std::atomic<bool> g_ownInputAttached{false};
+std::atomic<int> g_refocusCount{0};
+
+void AttachOwnInputProbe(wuxc::Panel const& parent) try {
+    wuxc::TextBox box;
+    box.Name(L"WindhawkOwnInputProbe");
+    box.PlaceholderText(L"Windhawk probe -- type here");
+    box.Height(34);
+    box.Margin(wux::ThicknessHelper::FromLengths(12, 6, 12, 6));
+    parent.Children().InsertAt(0, box);
+    g_probeBox = box;
+
+    g_probeChanged = box.TextChanged(
+        winrt::auto_revoke,
+        [](wf::IInspectable const& sender, wuxc::TextChangedEventArgs const&) {
+            try {
+                auto ours = sender.as<wuxc::TextBox>();
+                std::wstring mine{ours.Text()};
+                std::wstring theirs =
+                    g_queryBox ? DocumentText(g_queryBox) : L"(no box)";
+                // The comparison is the whole point: if theirs is empty while
+                // mine is not, the host saw none of this.
+                Rec(L"probe: ours='%ls'  microsoft's='%ls'", mine.c_str(),
+                    theirs.c_str());
+            } catch (...) {
+            }
+        });
+
+    g_probeGot = box.GotFocus(
+        winrt::auto_revoke,
+        [](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+            Rec(L"probe: our box GOT focus");
+        });
+    g_probeLost = box.LostFocus(
+        winrt::auto_revoke,
+        [](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+            Rec(L"probe: our box LOST focus, now on %ls",
+                FocusedElementLabel().c_str());
+        });
+
+    bool took = box.Focus(wux::FocusState::Programmatic);
+    Rec(L"probe: box added; Focus() -> %d; focus is on %ls", took ? 1 : 0,
+        FocusedElementLabel().c_str());
+
+    // The host focuses its own box when the page is shown, which can happen
+    // after this runs. Watching for a few seconds distinguishes "we never got
+    // focus" from "we got it and it was taken back", which need different
+    // answers.
+    auto timer = wux::DispatcherTimer();
+    timer.Interval(std::chrono::milliseconds(500));
+    timer.Tick([timer, ticks = std::make_shared<int>(0)](
+                   wf::IInspectable const&, wf::IInspectable const&) {
+        if (++*ticks > 40) {
+            timer.Stop();
+            return;
+        }
+        std::wstring who = FocusedElementLabel();
+        bool ours = who.find(L"WindhawkOwnInputProbe") != std::wstring::npos;
+        if (!ours && g_probeBox && g_refocusCount.load() < 10) {
+            int n = ++g_refocusCount;
+            bool took = g_probeBox.Focus(wux::FocusState::Programmatic);
+            Rec(L"probe: t+%dms focus was on %ls -- retook it (%d) -> %d",
+                *ticks * 500, who.c_str(), n, took ? 1 : 0);
+            return;
+        }
+        Rec(L"probe: t+%dms focus=%ls", *ticks * 500, who.c_str());
+    });
+    timer.Start();
+    g_probeTimer = timer;
+} catch (...) {
+    Rec(L"probe: failed %08X", static_cast<unsigned>(winrt::to_hresult()));
+}
+
+// Collapses Cortana's box on a search page, and keeps it collapsed.
+//
+// Found by hand in UWPSpy first: with that box hidden, typing in the Start
+// menu stops handing off to SearchHost. Measured afterwards -- Start kept the
+// keyboard through every keystroke of a whole cycle.
+//
+// Keeping it collapsed is the hard part, and two attempts got it wrong.
+// Collapsing once per session missed every rebuilt page. Collapsing once per
+// page then revoking looked right but was not: the host rebuilds the page
+// repeatedly ("TaskbarSearchPage added" six times in one session), the search
+// finds the previous, already-collapsed box, sees nothing to do and gives up,
+// and the new page's visible box is never touched. The handoff then happens a
+// couple of seconds later, which is exactly what the trace showed.
+//
+// So this does not revoke on success. It holds a weak reference to whichever
+// box it last collapsed and re-checks it each layout pass, which is cheap; it
+// only walks the tree again when that reference is dead or still visible.
+void HideHostSearchBoxWhenReady(wux::FrameworkElement const& page) {
+    auto pageRef = page;
+    auto token = std::make_shared<wux::FrameworkElement::LayoutUpdated_revoker>();
+    auto known = std::make_shared<winrt::weak_ref<wux::FrameworkElement>>();
+    auto passes = std::make_shared<int>(0);
+
+    *token = page.LayoutUpdated(
+        winrt::auto_revoke,
+        [pageRef, token, known, passes](wf::IInspectable const&,
+                                        wf::IInspectable const&) {
+            try {
+                // Stop once the page itself is gone, so a rebuilt page does
+                // not leave a handler running against a dead tree forever.
+                if (!pageRef.Parent() && pageRef.ActualWidth() == 0) {
+                    if (++*passes > 200) {
+                        token->revoke();
+                    }
+                    return;
+                }
+                *passes = 0;
+
+                if (auto ctl = known->get()) {
+                    if (ctl.Visibility() == wux::Visibility::Visible) {
+                        ctl.Visibility(wux::Visibility::Collapsed);
+                        Rec(L"host search control re-collapsed");
+                    }
+                    return;  // the cheap path, and the common one
+                }
+
+                // The whole control, not the RichEditBox inside it.
+                //
+                // Collapsing just the inner box left the control visible and
+                // still clickable, and clicking it took SearchHost down:
+                // 0xc0000005 inside SearchUx.UI.dll, the host's own code,
+                // driving a text box that was no longer laid out. Hiding the
+                // control removes the thing that can be clicked at all.
+                auto obj = FindDescendantByType(
+                    pageRef, L"Cortana.UI.Views.RichSearchBoxControl", 20);
+                auto ctl = obj ? obj.try_as<wux::FrameworkElement>() : nullptr;
+                if (!ctl) {
+                    return;
+                }
+                *known = winrt::make_weak(ctl);
+                if (ctl.Visibility() == wux::Visibility::Visible) {
+                    ctl.Visibility(wux::Visibility::Collapsed);
+                    Rec(L"host search control collapsed: %ls",
+                        ElementLabel(ctl).c_str());
+                } else {
+                    Rec(L"host search control already collapsed");
+                }
+            } catch (...) {
+                token->revoke();
+            }
+        });
+}
+
 void AttachQueryBox(wux::FrameworkElement const& page) {
     auto box = FindQueryBox(page, 20);
     if (!box) {
@@ -1148,6 +1401,16 @@ void RemoveInjection() {
     g_webHost = nullptr;
     g_queryChanged.revoke();
     g_queryBox = nullptr;
+    if (g_probeTimer) {
+        g_probeTimer.Stop();
+        g_probeTimer = nullptr;
+    }
+    g_probeChanged.revoke();
+    g_probeGot.revoke();
+    g_probeLost.revoke();
+    g_probeBox = nullptr;
+    g_ownInputAttached.store(false);
+    g_refocusCount.store(0);
     g_typed.clear();
     g_lastBoxText.clear();
     g_lastPublished.clear();
@@ -1212,6 +1475,27 @@ class VisualTreeWatcher
         if (wcscmp(element.Type, L"Cortana.UI.Views.TaskbarSearchPage") != 0) {
             return S_OK;
         }
+        // Hiding the box has to happen for *every* page, including the ones
+        // built after the panel exists -- unlike the panel itself, which is
+        // built once. So this runs before the g_built check rather than after
+        // it.
+        if (g_settings.hideHostSearchBox) {
+            static int pages = 0;
+            Rec(L"page #%d seen; arming the hide", ++pages);
+            try {
+                wf::IInspectable pageObj;
+                if (SUCCEEDED(m_XamlDiagnostics->GetIInspectableFromHandle(
+                        element.Handle,
+                        reinterpret_cast<::IInspectable**>(
+                            winrt::put_abi(pageObj))))) {
+                    if (auto pageFe = pageObj.try_as<wux::FrameworkElement>()) {
+                        HideHostSearchBoxWhenReady(pageFe);
+                    }
+                }
+            } catch (...) {
+            }
+        }
+
         if (g_built) {
             return S_OK;
         }
@@ -1250,6 +1534,32 @@ class VisualTreeWatcher
                     DumpTree(pageRef, 0, 25);
                     Rec(L"--- tree dump ends ---");
                 }
+                // Our own input box goes in here, at the first laid-out
+                // frame of the page. Everything below this waits for the web
+                // view host, which is far too late to own the first keystroke.
+                if (g_settings.ownInputProbe &&
+                    !g_ownInputAttached.exchange(true)) {
+                    auto rootObj =
+                        FindDescendantByName(pageRef, L"RootGrid", 20);
+                    auto rootPanel =
+                        rootObj ? rootObj.try_as<wuxc::Panel>() : nullptr;
+                    if (!rootPanel) {
+                        Rec(L"probe: no RootGrid panel to attach to");
+                    } else {
+                        // Microsoft's box is found here too, rather than at
+                        // panel-build time, so the log can show what it holds
+                        // from the very first keystroke onwards.
+                        if (!g_queryBox) {
+                            if (auto theirs = FindQueryBox(pageRef, 20)) {
+                                g_queryBox = theirs;
+                            }
+                        }
+                        Rec(L"probe: attaching at page layout (page %.0fx%.0f)",
+                            pageRef.ActualWidth(), pageRef.ActualHeight());
+                        AttachOwnInputProbe(rootPanel);
+                    }
+                }
+
                 // Path confirmed with UWPSpy:
                 //   RootGrid > QueryFormulationRoot > QueryFormulation > Grid
                 //     > HostedWebView2Control > WebViewGrid > WebView2
@@ -1308,6 +1618,8 @@ class VisualTreeWatcher
                     g_webHost = host;
                     if (BuildPanel(parent) && CreateListener()) {
                         AttachQueryBox(pageRef);
+                        // The probe box is attached earlier now, at the
+                        // page's first layout pass -- see above.
                         Rec(L"ready: panel built (host %.0fx%.0f, anchor "
                             L"%.0fx%.0f)",
                             host.ActualWidth(), host.ActualHeight(),
