@@ -82,8 +82,13 @@ This build only hides the button and logs what is around it. Output goes to
 // types and must be defined before use.
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <shlguid.h>
+#include <shobjidl.h>
+
+#include "broker/apps_index.h"
 #include "broker/everything_ipc.h"
 #include "broker/file_ranker.h"
+#include "broker/icon_util.h"
 
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Core.h>
@@ -93,6 +98,7 @@ This build only hides the button and logs what is around it. Output goes to
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 
@@ -110,6 +116,7 @@ This build only hides the button and logs what is around it. Output goes to
 #include <string>
 #include <string_view>
 #include <condition_variable>
+#include <map>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -376,6 +383,349 @@ void RestoreWindowSoon() {
     }
 }
 
+// Results, handed from the search thread to the XAML thread.
+[[clang::no_destroy]] std::mutex g_resultsMutex;
+[[clang::no_destroy]] std::vector<everything::Result> g_results;
+std::atomic<DWORD> g_totalMatches{0};
+
+[[clang::no_destroy]] std::thread g_searchThread;
+[[clang::no_destroy]] std::mutex g_queryMutex;
+[[clang::no_destroy]] std::condition_variable g_queryWake;
+[[clang::no_destroy]] std::wstring g_pendingQuery;
+std::atomic<bool> g_searchQuit{false};
+std::atomic<bool> g_queryDirty{false};
+
+// A row as the XAML thread needs it: text, an optional icon as raw BGRA, and
+// what to do when it is clicked.
+//
+// Icons travel as pixels rather than as a path to fetch later, because the
+// fetch is the slow part and it has already happened on the search thread.
+struct Row {
+    std::wstring title;
+    std::wstring subtitle;
+    std::wstring openPath;   // files: what ShellExecute opens
+    int appIndex = -1;       // apps: which entry of the index to launch
+    std::vector<BYTE> icon;  // BGRA, kIconSize square, or empty
+};
+
+// Fetched at 48, drawn at 24.
+//
+// These are two different things and conflating them is what made the first
+// attempt look blurry. The draw size is in logical pixels, so on a display at
+// 150% a 24-logical icon is 36 real pixels -- a 24px bitmap has to be
+// stretched to fill it. Asking the shell for 48 and letting XAML scale down
+// stays sharp to 200%, and costs nothing extra: the shell has these sizes
+// already.
+inline constexpr int kIconSize = 48;     // what we ask the shell for
+inline constexpr int kIconDisplay = 24;  // what it occupies in the row
+
+[[clang::no_destroy]] std::vector<Row> g_appRows;
+[[clang::no_destroy]] std::vector<Row> g_fileRows;
+
+// Launch requests, posted from the XAML thread back to the search thread,
+// which owns the app index and therefore the PIDLs.
+//
+// A PIDL cannot simply be captured in a click handler: the index is rebuilt
+// and the pointer would dangle. Sending an index back to the owning thread
+// keeps the lifetime where the data lives.
+[[clang::no_destroy]] std::mutex g_launchMutex;
+std::atomic<int> g_launchRequest{-1};
+
+// ---------------------------------------------------------------------------
+// The results list
+//
+// Sits over the pinned apps, in the same Grid the search row lives in, and is
+// shown only while there is a query. Hiding it again restores the menu
+// exactly, because nothing about the menu's own children is touched -- the
+// list is simply collapsed.
+// ---------------------------------------------------------------------------
+
+[[clang::no_destroy]] wuxc::StackPanel g_resultsList{nullptr};
+[[clang::no_destroy]] wuxc::Grid g_resultsHost{nullptr};
+[[clang::no_destroy]] wuxc::TextBlock g_resultsHeader{nullptr};
+
+// Opens what was clicked.
+//
+// ShellExecute rather than CreateProcess: these are paths of any kind, and
+// the shell decides what opening one means. This process runs at the user's
+// own integrity, so what opens is what the user would have opened -- which is
+// exactly what the broker could not promise when it ran elevated.
+void OpenResult(std::wstring path) {
+    std::thread([path = std::move(path)] {
+        SHELLEXECUTEINFOW info{};
+        info.cbSize = sizeof(info);
+        info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+        info.lpVerb = L"open";
+        info.lpFile = path.c_str();
+        info.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&info)) {
+            Rec(L"open failed (%lu): %ls", GetLastError(), path.c_str());
+        }
+    }).detach();
+}
+
+[[clang::no_destroy]] wuxc::StackPanel g_appsList{nullptr};
+
+// Two columns, apps on the left and files on the right.
+//
+// Star widths rather than pixels, so the split holds at whatever size the
+// menu is: 832 here, but that follows display scaling and the user's
+// settings rather than being a constant.
+void BuildResultsList(wuxc::Panel const& cell) try {
+    wuxc::Grid root;
+    root.Name(L"WindhawkEverythingResults");
+    root.Margin(wux::ThicknessHelper::FromLengths(0, 72, 0, 0));
+    root.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+    root.VerticalAlignment(wux::VerticalAlignment::Stretch);
+    root.Visibility(wux::Visibility::Collapsed);
+    root.Padding(wux::ThicknessHelper::FromLengths(20, 8, 20, 16));
+
+    wuxc::ColumnDefinition appsCol, filesCol;
+    appsCol.Width(
+        wux::GridLengthHelper::FromValueAndType(42, wux::GridUnitType::Star));
+    filesCol.Width(
+        wux::GridLengthHelper::FromValueAndType(58, wux::GridUnitType::Star));
+    root.ColumnDefinitions().Append(appsCol);
+    root.ColumnDefinitions().Append(filesCol);
+
+    wuxc::StackPanel apps;
+    wuxc::ScrollViewer appsScroll;
+    appsScroll.Content(apps);
+    appsScroll.VerticalScrollBarVisibility(wuxc::ScrollBarVisibility::Auto);
+    appsScroll.HorizontalScrollBarVisibility(
+        wuxc::ScrollBarVisibility::Disabled);
+    wuxc::Grid::SetColumn(appsScroll, 0);
+    root.Children().Append(appsScroll);
+
+    wuxc::StackPanel files;
+    wuxc::ScrollViewer filesScroll;
+    filesScroll.Content(files);
+    filesScroll.VerticalScrollBarVisibility(wuxc::ScrollBarVisibility::Auto);
+    filesScroll.HorizontalScrollBarVisibility(
+        wuxc::ScrollBarVisibility::Disabled);
+    wuxc::Grid::SetColumn(filesScroll, 1);
+    root.Children().Append(filesScroll);
+
+    // Spanning every row and column of the menu's grid.
+    //
+    // Appending to a Grid without saying which row puts the child in row 0 --
+    // the 64px search row -- where the first attempt was clipped out of sight
+    // and looked as though nothing had rendered.
+    wuxc::Grid::SetRow(root, 0);
+    wuxc::Grid::SetRowSpan(root, 12);
+    wuxc::Grid::SetColumn(root, 0);
+    wuxc::Grid::SetColumnSpan(root, 12);
+
+    // The menu's own acrylic, reused rather than approximated.
+    //
+    // Border#AcrylicBorder is what gives the Start menu its material. Taking
+    // that brush means this matches exactly, and follows light/dark and the
+    // transparency setting without having to know what any of them are.
+    bool took = false;
+    try {
+        wux::DependencyObject node = cell;
+        for (int up = 0; up < 6 && node; ++up) {
+            node = wuxm::VisualTreeHelper::GetParent(node);
+            auto fe = node ? node.try_as<wux::FrameworkElement>() : nullptr;
+            if (fe && fe.Name() == L"MainMenu") {
+                if (auto found =
+                        FindDescendantByName(fe, L"AcrylicBorder", 4)) {
+                    if (auto border = found.try_as<wuxc::Border>()) {
+                        if (auto brush = border.Background()) {
+                            root.Background(brush);
+                            took = true;
+                            Rec(L"results: using the menu's own acrylic");
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    } catch (...) {
+    }
+    if (!took) {
+        root.Background(wuxm::SolidColorBrush{
+            winrt::Windows::UI::ColorHelper::FromArgb(0xF2, 0x20, 0x20, 0x20)});
+        Rec(L"results: no AcrylicBorder found; flat background instead");
+    }
+
+    cell.Children().Append(root);
+    g_appsList = apps;
+    g_resultsList = files;
+    g_resultsHost = root;
+    Rec(L"results: two columns built");
+} catch (...) {
+    Rec(L"results list failed %08X", static_cast<unsigned>(winrt::to_hresult()));
+}
+
+// Runs on the XAML thread.
+void RenderResults() try {
+    if (!g_resultsList || !g_resultsHost || !g_appsList) {
+        return;
+    }
+
+    std::vector<Row> files;
+    std::vector<Row> appNames;
+    DWORD total = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_resultsMutex);
+        files = g_fileRows;
+        appNames = g_appRows;
+        total = g_totalMatches.load();
+    }
+
+    g_resultsList.Children().Clear();
+    g_appsList.Children().Clear();
+
+    if (files.empty() && appNames.empty()) {
+        // Empty box, or nothing matched: the menu comes back exactly as it
+        // was, because none of the menu's own children were ever changed --
+        // this only stops covering them.
+        g_resultsHost.Visibility(wux::Visibility::Collapsed);
+        Rec(L"render: nothing to show; menu restored");
+        return;
+    }
+
+    auto heading = [](std::wstring text) {
+        wuxc::TextBlock header;
+        header.Text(winrt::hstring{text});
+        header.Opacity(0.6);
+        header.FontSize(12);
+        header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+        header.Margin(wux::ThicknessHelper::FromLengths(12, 0, 0, 8));
+        return header;
+    };
+
+    // A row, with its icon if the search thread managed to fetch one.
+    auto row = [](const Row& item) {
+        wuxc::Grid layout;
+        wuxc::ColumnDefinition iconCol, textCol;
+        iconCol.Width(wux::GridLengthHelper::FromValueAndType(
+            0, wux::GridUnitType::Auto));
+        textCol.Width(wux::GridLengthHelper::FromValueAndType(
+            1, wux::GridUnitType::Star));
+        layout.ColumnDefinitions().Append(iconCol);
+        layout.ColumnDefinitions().Append(textCol);
+
+        if (item.icon.size() ==
+            static_cast<size_t>(kIconSize) * kIconSize * 4) {
+            // The pixels came over as BGRA from the search thread; a
+            // WriteableBitmap is the one surface that takes them directly,
+            // without going back to the shell on this thread.
+            wuxmi::WriteableBitmap bmp{kIconSize, kIconSize};
+            auto buffer = bmp.PixelBuffer();
+            auto access = buffer.as<
+                ::Windows::Storage::Streams::IBufferByteAccess>();
+            BYTE* dest = nullptr;
+            if (SUCCEEDED(access->Buffer(&dest)) && dest) {
+                memcpy(dest, item.icon.data(), item.icon.size());
+                bmp.Invalidate();
+                wuxc::Image image;
+                image.Source(bmp);
+                image.Width(kIconDisplay);
+                image.Height(kIconDisplay);
+                image.Margin(wux::ThicknessHelper::FromLengths(0, 0, 10, 0));
+                image.VerticalAlignment(wux::VerticalAlignment::Center);
+                wuxc::Grid::SetColumn(image, 0);
+                layout.Children().Append(image);
+            }
+        }
+
+        wuxc::StackPanel text;
+        wuxc::Grid::SetColumn(text, 1);
+        wuxc::TextBlock name;
+        name.Text(winrt::hstring{item.title});
+        name.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+        name.TextWrapping(wux::TextWrapping::NoWrap);
+        text.Children().Append(name);
+
+        if (!item.subtitle.empty()) {
+            wuxc::TextBlock sub;
+            sub.Text(winrt::hstring{item.subtitle});
+            sub.Opacity(0.5);
+            sub.FontSize(11);
+            sub.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+            sub.TextWrapping(wux::TextWrapping::NoWrap);
+            text.Children().Append(sub);
+        }
+        layout.Children().Append(text);
+
+        wuxc::Button button;
+        button.Content(layout);
+        button.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+        button.HorizontalContentAlignment(wux::HorizontalAlignment::Stretch);
+        button.Background(
+            wuxm::SolidColorBrush{winrt::Windows::UI::Colors::Transparent()});
+        button.BorderThickness(wux::ThicknessHelper::FromUniformLength(0));
+        button.Padding(wux::ThicknessHelper::FromLengths(12, 7, 12, 7));
+        button.Margin(wux::ThicknessHelper::FromLengths(0, 0, 0, 2));
+
+        if (!item.openPath.empty()) {
+            std::wstring target = item.openPath;
+            button.Click([target](wf::IInspectable const&,
+                                  wux::RoutedEventArgs const&) {
+                OpenResult(target);
+            });
+        } else if (item.appIndex >= 0) {
+            // Handed back to the search thread, which owns the PIDL.
+            int which = item.appIndex;
+            button.Click([which](wf::IInspectable const&,
+                                 wux::RoutedEventArgs const&) {
+                g_launchRequest.store(which);
+                g_queryWake.notify_all();
+            });
+        }
+        return button;
+    };
+
+    // Apps on the left. The column keeps its width when empty for now; giving
+    // the space back to files when there are no apps is a layout change worth
+    // making deliberately.
+    g_appsList.Children().Append(heading(L"Apps"));
+    if (appNames.empty()) {
+        wuxc::TextBlock none;
+        none.Text(L"No matching apps");
+        none.Opacity(0.4);
+        none.FontSize(12);
+        none.Margin(wux::ThicknessHelper::FromLengths(12, 0, 0, 0));
+        g_appsList.Children().Append(none);
+    }
+    for (const Row& app : appNames) {
+        g_appsList.Children().Append(row(app));
+    }
+
+    // Files on the right.
+    g_resultsList.Children().Append(
+        heading(L"Files \u2014 " + std::to_wstring(files.size()) + L" of " +
+                std::to_wstring(total)));
+    for (const Row& file : files) {
+        g_resultsList.Children().Append(row(file));
+    }
+
+    g_resultsHost.Visibility(wux::Visibility::Visible);
+    Rec(L"render: %zu apps, %zu files, host %.0fx%.0f", appNames.size(),
+        files.size(), g_resultsHost.ActualWidth(),
+        g_resultsHost.ActualHeight());
+} catch (...) {
+    Rec(L"render failed %08X", static_cast<unsigned>(winrt::to_hresult()));
+}
+
+// Called from the search thread once results are in.
+void RequestRender() {
+    try {
+        if (!g_ourBox) {
+            return;
+        }
+        auto dispatcher = g_ourBox.Dispatcher();
+        if (!dispatcher) {
+            return;
+        }
+        dispatcher.RunAsync(wuc::CoreDispatcherPriority::Normal,
+                            wuc::DispatchedHandler{[] { RenderResults(); }});
+    } catch (...) {
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Asking Everything, from inside the Start menu
 //
@@ -387,17 +737,7 @@ void RestoreWindowSoon() {
 // ~60ms. 120ms was measured as comfortable in the broker.
 // ---------------------------------------------------------------------------
 
-[[clang::no_destroy]] std::thread g_searchThread;
-[[clang::no_destroy]] std::mutex g_queryMutex;
-[[clang::no_destroy]] std::condition_variable g_queryWake;
-[[clang::no_destroy]] std::wstring g_pendingQuery;
-std::atomic<bool> g_searchQuit{false};
-std::atomic<bool> g_queryDirty{false};
 
-// Results, handed from the search thread to the XAML thread.
-[[clang::no_destroy]] std::mutex g_resultsMutex;
-[[clang::no_destroy]] std::vector<everything::Result> g_results;
-std::atomic<DWORD> g_totalMatches{0};
 
 void QueueQuery(std::wstring text) {
     {
@@ -408,7 +748,91 @@ void QueueQuery(std::wstring text) {
     g_queryWake.notify_all();
 }
 
+// An app's icon, from its shell identity.
+//
+// Not the extension cache: that answers from a file type, and an app is not a
+// file type -- every app has its own icon, so there is nothing to share. It
+// goes through the item itself for the same reason the index stores PIDLs
+// rather than paths: AUMIDs and known-folder GUIDs cannot be re-parsed back
+// into something SHGetFileInfo understands.
+//
+// Measured at roughly 9.7ms per app in the broker, so this runs on the search
+// thread and is cached by name. Six visible rows make it about 60ms once, and
+// nothing after that.
+bool FetchAppIcon(const apps::App* app, int size, std::vector<BYTE>* out) {
+    if (!app || !app->pidl || !out) {
+        return false;
+    }
+    IShellItem* item = nullptr;
+    if (FAILED(SHCreateItemFromIDList(app->pidl.get(), IID_PPV_ARGS(&item))) ||
+        !item) {
+        return false;
+    }
+    bool ok = false;
+    IShellItemImageFactory* factory = nullptr;
+    if (SUCCEEDED(item->QueryInterface(IID_PPV_ARGS(&factory))) && factory) {
+        SIZE want{size, size};
+        HBITMAP bitmap = nullptr;
+        if (SUCCEEDED(factory->GetImage(
+                want, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, &bitmap)) &&
+            bitmap) {
+            ok = icons::BitmapToBgra(bitmap, size, out);
+            DeleteObject(bitmap);
+        }
+        factory->Release();
+    }
+    item->Release();
+    return ok;
+}
+
+// Opens an app by its shell identity.
+//
+// By PIDL rather than by name: apps_index.h explains why -- the parsing names
+// come in several shapes, including AUMIDs and known-folder GUIDs, and
+// rebuilding a path from them fails outright for some. The PIDL works for all
+// of them.
+//
+// Called only on the search thread, which owns the index and therefore the
+// PIDLs. A click handler cannot hold one: the index is rebuilt and the
+// pointer would dangle.
+void LaunchApp(const std::vector<const apps::App*>& hits, size_t which) {
+    if (which >= hits.size() || !hits[which]) {
+        return;
+    }
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_IDLIST | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    info.lpIDList = const_cast<void*>(
+        static_cast<const void*>(hits[which]->pidl.get()));
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        Rec(L"app launch failed (%lu): %ls", GetLastError(),
+            hits[which]->name.c_str());
+    } else {
+        Rec(L"launched %ls", hits[which]->name.c_str());
+    }
+}
+
 void SearchThreadMain() {
+    // COM for the apps index: it enumerates shell:AppsFolder.
+    HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    apps::Index appIndex;
+    if (appIndex.Rebuild()) {
+        Rec(L"apps: indexed");
+    } else {
+        Rec(L"apps: index failed");
+    }
+
+    icons::ExtensionCache iconCache(kIconSize);
+
+    // The apps behind the rows currently on screen, in the same order.
+    std::vector<const apps::App*> lastHits;
+
+    // One fetch per app, ever. Keyed by name because that is what identifies
+    // an entry across index rebuilds.
+    std::map<std::wstring, std::vector<BYTE>> appIconCache;
+
     everything::Client client;
     if (!client.Init()) {
         Rec(L"search: could not create the reply window");
@@ -426,7 +850,16 @@ void SearchThreadMain() {
                 return g_queryDirty.load() || g_searchQuit.load();
             });
             if (g_searchQuit.load()) {
+                if (SUCCEEDED(comHr)) {
+                    CoUninitialize();
+                }
                 return;
+            }
+            int wanted = g_launchRequest.exchange(-1);
+            if (wanted >= 0) {
+                lock.unlock();
+                LaunchApp(lastHits, static_cast<size_t>(wanted));
+                continue;
             }
             if (!g_queryDirty.exchange(false)) {
                 continue;
@@ -451,9 +884,14 @@ void SearchThreadMain() {
         last = query;
 
         if (query.empty()) {
-            std::lock_guard<std::mutex> lock(g_resultsMutex);
-            g_results.clear();
-            g_totalMatches.store(0);
+            {
+                std::lock_guard<std::mutex> lock(g_resultsMutex);
+                g_results.clear();
+                g_appRows.clear();
+                g_fileRows.clear();
+                g_totalMatches.store(0);
+            }
+            RequestRender();
             continue;
         }
 
@@ -470,11 +908,63 @@ void SearchThreadMain() {
         }
 
         ranker::Rank(&pool, query, 12);
+
+        // Apps are a name match over an index built once at startup, so this
+        // costs nothing next to the file query.
+        std::vector<Row> appRows;
+        lastHits.clear();
+        for (const apps::Match& m : appIndex.Search(query, 6)) {
+            if (!m.app) {
+                continue;
+            }
+            Row row;
+            row.title = m.app->name;
+            row.subtitle = L"App";
+            row.appIndex = static_cast<int>(lastHits.size());
+
+            auto cached = appIconCache.find(m.app->name);
+            if (cached == appIconCache.end()) {
+                std::vector<BYTE> pixels;
+                FetchAppIcon(m.app, kIconSize, &pixels);
+                cached = appIconCache.emplace(m.app->name, std::move(pixels))
+                             .first;
+            }
+            row.icon = cached->second;
+
+            appRows.push_back(std::move(row));
+            // The App outlives this loop -- the index owns it and lives as
+            // long as this thread -- so a pointer is safe here in a way it
+            // would not be inside a XAML click handler.
+            lastHits.push_back(m.app);
+        }
+
+        std::vector<Row> fileRows;
+        for (const everything::Result& r : pool) {
+            Row row;
+            row.title = r.name;
+            row.subtitle = r.path;
+            row.openPath = r.path;
+            if (!row.openPath.empty() && row.openPath.back() != L'\\') {
+                row.openPath += L'\\';
+            }
+            row.openPath += r.name;
+            // One shell call per distinct extension, not per row: the cache
+            // answers from the registered file type without touching disk.
+            if (const std::vector<BYTE>* pixels =
+                    iconCache.Get(r.name, r.isFolder)) {
+                row.icon = *pixels;
+            }
+            fileRows.push_back(std::move(row));
+        }
+
         {
             std::lock_guard<std::mutex> lock(g_resultsMutex);
             g_results = pool;
+            g_appRows = appRows;
+            g_fileRows = fileRows;
             g_totalMatches.store(total);
         }
+        RequestRender();
         Rec(L"search: '%ls' -> %u matches, kept %zu (%lld ms)", query.c_str(),
             total, pool.size(), static_cast<long long>(ms));
         for (size_t i = 0; i < pool.size() && i < 5; ++i) {
@@ -790,6 +1280,14 @@ void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
     Rec(L"own box: placed in %ls (%.0fx%.0f)", ElementLabel(cell).c_str(),
         box.Width(), box.Height());
 
+    // The results go in the same cell's parent, so they can use the menu's
+    // full width rather than the search row's.
+    if (auto owner = wuxm::VisualTreeHelper::GetParent(cell)) {
+        if (auto ownerPanel = owner.try_as<wuxc::Panel>()) {
+            BuildResultsList(ownerPanel);
+        }
+    }
+
     // Focus once, when the menu opens -- and then leave it alone.
     //
     // The log answered what had been guesswork: focus goes to
@@ -1037,6 +1535,28 @@ class WindhawkTAP : public winrt::implements<WindhawkTAP, IObjectWithSite,
         g_refocus.Stop();
         g_refocus = nullptr;
     }
+    if (g_appsList) {
+        try {
+            g_appsList.Children().Clear();
+        } catch (...) {
+        }
+        g_appsList = nullptr;
+    }
+    if (g_resultsList) {
+        try {
+            g_resultsList.Children().Clear();
+        } catch (...) {
+        }
+    }
+    if (g_resultsHost) {
+        try {
+            g_resultsHost.Visibility(wux::Visibility::Collapsed);
+        } catch (...) {
+        }
+    }
+    g_resultsList = nullptr;
+    g_resultsHost = nullptr;
+
     g_ourBoxChanged.revoke();
     g_ourBoxLost.revoke();
     g_ourBox = nullptr;

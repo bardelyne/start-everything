@@ -120,7 +120,37 @@ class ExtensionCache {
         SHFILEINFOW info{};
         DWORD attributes =
             isFolder ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-        if (SHGetFileInfoW(probe.c_str(), attributes, &info, sizeof(info),
+
+        // Above 32px, go through the system image list rather than
+        // SHGFI_LARGEICON.
+        //
+        // SHGFI_LARGEICON is 32 and nothing else, so asking it for a 48px
+        // icon gets a 32px one stretched -- visibly soft once the row is
+        // drawn on a scaled display. SHIL_EXTRALARGE is 48 and SHIL_JUMBO is
+        // 256; the shell already has both, so the sharper one costs no more
+        // than the blurry one did.
+        bool got = false;
+        if (size_ > 32) {
+            if (SHGetFileInfoW(probe.c_str(), attributes, &info, sizeof(info),
+                               SHGFI_USEFILEATTRIBUTES | SHGFI_SYSICONINDEX)) {
+                IImageList* list = nullptr;
+                int which = (size_ > 48) ? SHIL_JUMBO : SHIL_EXTRALARGE;
+                if (SUCCEEDED(SHGetImageList(which, IID_PPV_ARGS(&list))) &&
+                    list) {
+                    HICON icon = nullptr;
+                    if (SUCCEEDED(list->GetIcon(info.iIcon, ILD_TRANSPARENT,
+                                                &icon)) &&
+                        icon) {
+                        got = IconToBgra(icon, size_, &pixels);
+                        DestroyIcon(icon);
+                    }
+                    list->Release();
+                }
+            }
+        }
+
+        if (!got &&
+            SHGetFileInfoW(probe.c_str(), attributes, &info, sizeof(info),
                            SHGFI_USEFILEATTRIBUTES | SHGFI_ICON |
                                SHGFI_LARGEICON)) {
             IconToBgra(info.hIcon, size_, &pixels);

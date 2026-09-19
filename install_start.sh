@@ -31,7 +31,7 @@ NAME="local@start-everything_0.1_$(date +%H%M%S).dll"
   -Wl,--export-all-symbols \
   -o "$MODS/$NAME" \
   -x c++ start-everything.wh.cpp \
-  -lwindhawk -lole32 -loleaut32 -lruntimeobject
+  -lwindhawk -lole32 -loleaut32 -lruntimeobject -luuid -lshell32 -lshlwapi
 
 cp start-everything.wh.cpp "$SRCDIR/local@start-everything.wh.cpp"
 
