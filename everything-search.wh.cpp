@@ -60,6 +60,18 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 - rowHeight: 40
   $name: Row height
   $description: Height of one result row, in pixels.
+- stripAutoComplete: false
+  $name: Erase the box's guess as you type (experimental)
+  $description: >-
+    The search box guesses the rest of what you are typing -- its own
+    behaviour, not the web results, and it stays on with every web-search
+    policy disabled. The guess is never sent to the broker either way, so
+    this only changes what you see.
+
+    Off by default because it does not work cleanly: rewriting the text the
+    control is in the middle of editing corrupted input on the fourth
+    keystroke in testing, emptying the box. Turn it on only if you want to
+    help work out why.
 - suppressWebResults: false
   $name: Stop the web results engine from starting
   $description: >-
@@ -95,6 +107,7 @@ broker degrades to ordinary Windows search rather than to an empty panel.
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
+#include <winrt/Windows.UI.Xaml.Input.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 
@@ -236,6 +249,7 @@ struct Settings {
     int filesColumnPercent = 58;
     bool showIcons = true;
     int rowHeight = 40;
+    bool stripAutoComplete = true;
     bool suppressWebResults = false;
 };
 
@@ -253,6 +267,7 @@ void LoadSettings() {
     if (g_settings.rowHeight < 24 || g_settings.rowHeight > 96) {
         g_settings.rowHeight = 40;
     }
+    g_settings.stripAutoComplete = Wh_GetIntSetting(L"stripAutoComplete") != 0;
     g_settings.suppressWebResults =
         Wh_GetIntSetting(L"suppressWebResults") != 0;
 }
@@ -485,8 +500,9 @@ std::atomic<DWORD> g_xamlThreadId{0};
 [[clang::no_destroy]] wuxc::TextBlock g_filesHeader{nullptr};
 [[clang::no_destroy]] wuxc::TextBlock g_status{nullptr};
 
-[[clang::no_destroy]] wuxc::TextBox g_queryBox{nullptr};
-[[clang::no_destroy]] wuxc::TextBox::TextChanged_revoker g_queryChanged;
+[[clang::no_destroy]] wuxc::RichEditBox g_queryBox{nullptr};
+[[clang::no_destroy]] wuxc::RichEditBox::TextChanged_revoker g_queryChanged;
+[[clang::no_destroy]] std::wstring g_lastBoxText;
 [[clang::no_destroy]] std::wstring g_lastPublished;
 
 bool g_built = false;     // the panel exists in the tree
@@ -548,15 +564,41 @@ std::wstring ElementLabel(wux::DependencyObject const& obj) {
     return label;
 }
 
-// The first TextBox under the page. Looked up by type rather than by name
-// because the name is not documented anywhere and would be one more thing to
-// break on a servicing update; there is only one text field on the search
-// page, and if that ever stops being true this logs what it found.
-wuxc::TextBox FindQueryBox(wux::DependencyObject const& root, int maxDepth) {
+// Writes the whole subtree to the log once per process. Diagnostic: the
+// element that holds the query is not a TextBox and is not named anywhere
+// documented, and the anchor this mod inserts against moves when the web
+// view is suppressed. Both are questions about what is actually there.
+void DumpTree(wux::DependencyObject const& root, int depth, int maxDepth) {
+    if (depth > maxDepth) {
+        return;
+    }
+    std::wstring indent(static_cast<size_t>(depth) * 2, L' ');
+    double w = 0, h = 0;
+    if (auto fe = root.try_as<wux::FrameworkElement>()) {
+        w = fe.ActualWidth();
+        h = fe.ActualHeight();
+    }
+    Rec(L"%ls%ls  [%.0fx%.0f]", indent.c_str(), ElementLabel(root).c_str(), w, h);
+
+    int count = wuxm::VisualTreeHelper::GetChildrenCount(root);
+    for (int i = 0; i < count; ++i) {
+        DumpTree(wuxm::VisualTreeHelper::GetChild(root, i), depth + 1, maxDepth);
+    }
+}
+
+// The search box, found by type.
+//
+// It is a RichEditBox, not a TextBox: the concrete type is
+// Cortana.UI.Views.CortanaRichSearchBox and its DefaultStyleKey is
+// Windows.UI.Xaml.Controls.RichEditBox. Looking for a TextBox found nothing
+// at all, which is why the query was never published. Searched by type
+// rather than by name because the name is undocumented and is one more thing
+// to break on a servicing update.
+wuxc::RichEditBox FindQueryBox(wux::DependencyObject const& root, int maxDepth) {
     if (maxDepth < 0) {
         return nullptr;
     }
-    if (auto box = root.try_as<wuxc::TextBox>()) {
+    if (auto box = root.try_as<wuxc::RichEditBox>()) {
         return box;
     }
     int count = wuxm::VisualTreeHelper::GetChildrenCount(root);
@@ -569,21 +611,81 @@ wuxc::TextBox FindQueryBox(wux::DependencyObject const& root, int maxDepth) {
     return nullptr;
 }
 
-// What the user actually typed, which is not always what the box contains.
-// When something completes the text inline it appends the completion and
-// leaves it selected, so the typed prefix is everything before the selection
-// starts. Reading Text alone turns "n" into "nVIDIA App" and sends the broker
-// off searching for the wrong thing.
-std::wstring TypedText(wuxc::TextBox const& box) {
-    std::wstring text{box.Text()};
-    int start = box.SelectionStart();
-    int length = box.SelectionLength();
-    if (length > 0 && start >= 0 &&
-        static_cast<size_t>(start) <= text.size() &&
-        static_cast<size_t>(start) + length == text.size()) {
-        text.resize(static_cast<size_t>(start));
+// A rich edit document always ends in a paragraph mark that is not part of
+// what anyone typed.
+std::wstring DocumentText(wuxc::RichEditBox const& box) {
+    winrt::hstring raw;
+    box.Document().GetText(wut::TextGetOptions::None, raw);
+    std::wstring text{raw};
+    while (!text.empty() && (text.back() == 13 || text.back() == 10)) {
+        text.pop_back();
     }
     return text;
+}
+
+// Telling a keystroke apart from a completion.
+//
+// The box raises TextChanged twice for every key: once with what was typed,
+// and again 60-100 ms later with its own guess appended. Measured:
+//
+//   'n'   -> 'nVIDIA App'   (97 ms)
+//   'no'  -> 'node.js'      (65 ms)
+//   'not' -> 'notepad'      (63 ms)
+//
+// The guess is not a selection -- the control marks the completed run by
+// colour, which is what its AutoCompletedForeground brush is for -- so there
+// is nothing in the text itself that says "this part was guessed".
+//
+// Key events looked like the answer and are not available: a RichEditBox
+// marks them handled as it consumes them, so a plain KeyDown handler never
+// runs, and AddHandler with handledEventsToo wants an IInspectable, which a
+// WinRT delegate is not.
+//
+// What is left is the shape of the change. A person adds one character at a
+// time or deletes; a completion appends several at once while keeping the
+// prefix. That misreads a one-character completion as typing, which is
+// harmless, and a multi-character paste as a completion, which costs one
+// keystroke of staleness.
+bool g_strippingCompletion = false;
+[[clang::no_destroy]] std::wstring g_typed;
+
+enum class Change { Typed, Completion };
+
+Change Classify(const std::wstring& text, const std::wstring& previousBox,
+                const std::wstring& typed) {
+    if (text.size() < previousBox.size()) {
+        return Change::Typed;  // a deletion is always a person
+    }
+    if (text.size() == previousBox.size() + 1 &&
+        text.compare(0, previousBox.size(), previousBox) == 0) {
+        return Change::Typed;  // one more character on the end
+    }
+    if (text.size() > typed.size() &&
+        text.compare(0, typed.size(), typed) == 0) {
+        return Change::Completion;  // the guess, extending what was typed
+    }
+    return Change::Typed;
+}
+
+// Puts the box back to what was actually typed.
+void StripCompletion(wuxc::RichEditBox const& box, const std::wstring& typed) {
+    // Never strip to nothing. If the classification is ever wrong the cost
+    // must be a stale guess left on screen, never a search box that deletes
+    // what is typed into it -- which is exactly what the previous attempt
+    // did.
+    if (g_strippingCompletion || typed.empty()) {
+        return;
+    }
+    g_strippingCompletion = true;
+    try {
+        auto document = box.Document();
+        document.SetText(wut::TextSetOptions::None, winrt::hstring{typed});
+        auto caret = static_cast<int32_t>(typed.size());
+        document.Selection().SetRange(caret, caret);
+    } catch (...) {
+        // Cosmetic. The query that was published is already the right one.
+    }
+    g_strippingCompletion = false;
 }
 
 // The panel cannot send the query anywhere: messages from here to a normal
@@ -986,18 +1088,29 @@ void AttachQueryBox(wux::FrameworkElement const& page) {
 
     g_queryChanged = box.TextChanged(
         winrt::auto_revoke,
-        [](wf::IInspectable const& sender, wuxc::TextChangedEventArgs const&) {
+        [](wf::IInspectable const& sender, wux::RoutedEventArgs const&) {
             try {
-                auto tb = sender.try_as<wuxc::TextBox>();
-                if (!tb) {
+                auto box = sender.try_as<wuxc::RichEditBox>();
+                if (!box || g_strippingCompletion) {
                     return;
                 }
-                std::wstring typed = TypedText(tb);
-                if (typed == g_lastPublished) {
-                    return;
+                std::wstring text = DocumentText(box);
+                Change change = Classify(text, g_lastBoxText, g_typed);
+                g_lastBoxText = text;
+
+                if (change == Change::Completion) {
+                    if (g_settings.stripAutoComplete) {
+                        StripCompletion(box, g_typed);
+                        g_lastBoxText = g_typed;
+                    }
+                    return;  // never publish a guess
                 }
-                g_lastPublished = typed;
-                PublishQuery(typed);
+
+                g_typed = text;
+                if (text != g_lastPublished) {
+                    g_lastPublished = text;
+                    PublishQuery(text);
+                }
             } catch (...) {
                 // A failure here must not take the search box down with it.
             }
@@ -1005,7 +1118,9 @@ void AttachQueryBox(wux::FrameworkElement const& page) {
 
     // Publish whatever is already in the box, so a broker that starts late
     // does not sit waiting for the next keystroke.
-    g_lastPublished = TypedText(box);
+    g_typed = DocumentText(box);
+    g_lastBoxText = g_typed;
+    g_lastPublished = g_typed;
     PublishQuery(g_lastPublished);
 }
 
@@ -1033,6 +1148,8 @@ void RemoveInjection() {
     g_webHost = nullptr;
     g_queryChanged.revoke();
     g_queryBox = nullptr;
+    g_typed.clear();
+    g_lastBoxText.clear();
     g_lastPublished.clear();
     g_built = false;
     g_takenOver = false;
@@ -1122,23 +1239,68 @@ class VisualTreeWatcher
                 if (g_built) {
                     return;
                 }
+                if (pageRef.ActualWidth() < 100) {
+                    return;  // page itself not laid out yet
+                }
+                static bool dumped = false;
+                if (!dumped) {
+                    dumped = true;
+                    Rec(L"--- tree dump begins (page %.0fx%.0f) ---",
+                        pageRef.ActualWidth(), pageRef.ActualHeight());
+                    DumpTree(pageRef, 0, 25);
+                    Rec(L"--- tree dump ends ---");
+                }
                 // Path confirmed with UWPSpy:
                 //   RootGrid > QueryFormulationRoot > QueryFormulation > Grid
                 //     > HostedWebView2Control > WebViewGrid > WebView2
                 // Hiding the host takes the whole results surface out of the
                 // layout, so nothing is asked to reflow into a narrower space.
+                // Two variants exist and which one the page builds is not
+                // stable: one run had
+                // HostedWebView2Control#QueryFormulationHostedWebView2 over a
+                // WebView2Standalone.Controls.WebView2, the next had
+                // HostedWebViewControl#QueryFormulationHostedWebView over a
+                // plain Windows.UI.Xaml.Controls.WebView. Anchoring on one
+                // name meant the panel silently never built on the other.
                 auto hostObj = FindDescendantByName(
                     pageRef, L"QueryFormulationHostedWebView2", 20);
+                if (!hostObj) {
+                    hostObj = FindDescendantByName(
+                        pageRef, L"QueryFormulationHostedWebView", 20);
+                }
                 auto host =
                     hostObj ? hostObj.try_as<wux::FrameworkElement>() : nullptr;
-                if (!host || host.ActualWidth() < 100) {
-                    return;  // not laid out yet
+                static bool complainedMissing = false;
+                if (!host) {
+                    if (!complainedMissing) {
+                        complainedMissing = true;
+                        Rec(L"anchor: no QueryFormulationHostedWebView[2] in the "
+                            L"tree");
+                    }
+                    return;
                 }
                 auto parent = wuxm::VisualTreeHelper::GetParent(host)
                                   .try_as<wuxc::Panel>();
-                if (!parent) {
+                auto parentFe = parent.try_as<wux::FrameworkElement>();
+                if (!parent || !parentFe) {
                     Rec(L"FAIL: the web view host's parent is not a Panel");
                     token->revoke();
+                    return;
+                }
+                // Wait on the parent's size, not the host's. When the web
+                // view is suppressed the host never gets one -- there is no
+                // browser to size it -- and keying off it meant the panel was
+                // never built in exactly the configuration it is needed for.
+                static bool complainedSize = false;
+                if (parentFe.ActualWidth() < 100) {
+                    if (!complainedSize) {
+                        complainedSize = true;
+                        Rec(L"anchor: %ls is %.0fx%.0f, host %.0fx%.0f -- "
+                            L"waiting for a size",
+                            ElementLabel(parentFe).c_str(),
+                            parentFe.ActualWidth(), parentFe.ActualHeight(),
+                            host.ActualWidth(), host.ActualHeight());
+                    }
                     return;
                 }
 
@@ -1146,9 +1308,10 @@ class VisualTreeWatcher
                     g_webHost = host;
                     if (BuildPanel(parent) && CreateListener()) {
                         AttachQueryBox(pageRef);
-                        Rec(L"ready: panel built, waiting for the broker "
-                            L"(host %.0fx%.0f)",
-                            host.ActualWidth(), host.ActualHeight());
+                        Rec(L"ready: panel built (host %.0fx%.0f, anchor "
+                            L"%.0fx%.0f)",
+                            host.ActualWidth(), host.ActualHeight(),
+                            parentFe.ActualWidth(), parentFe.ActualHeight());
                     }
                 } catch (...) {
                     Rec(L"FAIL during build: %08X",

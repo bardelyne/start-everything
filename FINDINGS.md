@@ -520,3 +520,58 @@ of the XAML tree, which beats driving UI Automation in from outside.
 **The broker must not run elevated.** It launches whatever the user clicks, so
 an elevated broker silently runs every app as administrator. Nothing enforces
 this yet; it is a property of how the process is started.
+
+## The search box, and where the completion really comes from
+
+The box completes what you type and the completion is wrong once this panel
+is answering instead. Chasing it produced three wrong theories before the
+right one, and a UWPSpy dump settled it.
+
+- **It is a RichEditBox, not a TextBox.** The concrete type is
+  `Cortana.UI.Views.CortanaRichSearchBox#SearchTextBox` and its
+  `DefaultStyleKey` is `Windows.UI.Xaml.Controls.RichEditBox`. Searching the
+  tree for a `TextBox` found nothing at all, so the query was never published
+  and the failure was silent.
+- **The completion is the control's own, not the web results.** The control
+  carries an `AutoCompletedForeground` brush -- a control only needs a brush
+  for painting completed text if it does the completing. That is why killing
+  the web view changed nothing, and why every web-search policy being
+  disabled changes nothing either. With Bing off it still completed `n` to
+  `nVIDIA App`, a locally installed app.
+- **TextChanged fires twice per keystroke.** Once with what was typed, then
+  60-100 ms later with the guess appended. Measured: `n` to `nVIDIA App`
+  (97 ms), `no` to `node.js` (65 ms), `not` to `notepad` (63 ms). Publishing
+  naively sends the guess to the broker, which then searches for a word
+  nobody typed.
+- **The guess is not a selection.** The first fix assumed it was and looked
+  for a trailing selected run, which never matched -- the control marks the
+  completed span by colour. Nothing in the text distinguishes the two events.
+- **Key events are not available either.** A RichEditBox marks them handled
+  as it consumes them, so a plain `KeyDown` handler never runs, and
+  `AddHandler` with `handledEventsToo` takes an `IInspectable`, which a WinRT
+  delegate is not.
+- **What works is the shape of the change.** A person adds one character or
+  deletes; a completion appends several at once while keeping the prefix.
+  Verified end to end: six keystrokes published `n`, `no`, `not`, `note`,
+  `notep`, `notepa` and not one guess, while the box on screen still showed
+  `notepad`.
+- **Do not rewrite the box's text.** Setting the document back to the typed
+  prefix looked like the way to hide the guess. It corrupted input on the
+  fourth keystroke and emptied the box. Shipped off by default. Making the
+  guess invisible by setting `AutoCompletedForeground` transparent, through
+  the diagnostics property API, would not fight the control and is the next
+  thing to try.
+
+### The anchor is not one element
+
+The panel inserts itself next to the results host, and that host has two
+forms. One run had
+`HostedWebView2Control#QueryFormulationHostedWebView2` over a
+`WebView2Standalone.Controls.WebView2`; the next had
+`HostedWebViewControl#QueryFormulationHostedWebView` over a plain
+`Windows.UI.Xaml.Controls.WebView`. Matching one name meant the panel
+silently never built on the other. It now accepts both.
+
+Related: when the web view is suppressed the host never gets a size, so
+waiting on the host's width meant the panel never built in exactly the
+configuration it is needed for. It waits on the host's parent instead.
