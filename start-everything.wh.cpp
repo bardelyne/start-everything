@@ -55,8 +55,10 @@ This build only hides the button and logs what is around it. Output goes to
     look like a caret. Nothing can be typed into it. Clicking or typing hands
     off to the search host, which owns the only real text box.
 
-    This collapses it and puts an actual TextBox in the same grid cell, so
-    there is something to type into without leaving the Start menu.
+    This keeps it -- the border and the magnifier are what make the Start menu
+    look like the Start menu -- and only takes away its click, which is what
+    hands off to the search host. A real, transparent TextBox goes on top, so
+    what you see is Microsoft's chrome with our text in it.
 - dumpTree: true
   $name: Log the surrounding tree
   $description: >-
@@ -80,6 +82,7 @@ This build only hides the button and logs what is around it. Output goes to
 // types and must be defined before use.
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Text.h>
@@ -250,9 +253,123 @@ void DumpTree(wux::DependencyObject const& root, int depth, int maxDepth) {
 // same size, to see whether the Start menu will host one at all.
 // ---------------------------------------------------------------------------
 
+// What currently has keyboard focus, for the log.
+std::wstring FocusedElementLabel() {
+    try {
+        auto focused = wux::Input::FocusManager::GetFocusedElement();
+        if (!focused) {
+            return L"(nothing)";
+        }
+        if (auto dobj = focused.try_as<wux::DependencyObject>()) {
+            return ElementLabel(dobj);
+        }
+        return std::wstring{winrt::get_class_name(focused)};
+    } catch (...) {
+        return L"(threw)";
+    }
+}
+
 [[clang::no_destroy]] wuxc::TextBox g_ourBox{nullptr};
 [[clang::no_destroy]] wuxc::TextBox::TextChanged_revoker g_ourBoxChanged;
 [[clang::no_destroy]] wux::UIElement::LostFocus_revoker g_ourBoxLost;
+[[clang::no_destroy]] wux::DispatcherTimer g_focusProbe{nullptr};
+[[clang::no_destroy]] wux::DispatcherTimer g_openFocus{nullptr};
+[[clang::no_destroy]] wux::DispatcherTimer g_refocus{nullptr};
+
+// Makes the Start menu's own window the active one.
+//
+// SearchHost takes the foreground about 140ms after Win is pressed and holds
+// it, even with its search box made inert. Everything inside Start is then
+// happening in an inactive window: XAML focus can be set and reported, but no
+// caret is drawn, which is exactly what was on screen.
+//
+// AttachThreadInput first, because SetForegroundWindow is refused for a
+// process that does not own the foreground -- the standard way round it is to
+// share input state with the thread that does, briefly, and detach again.
+// If it is refused anyway, that is logged rather than retried: a foreground
+// fight with the shell is not something to win by persistence.
+void TakeForeground() {
+    // Bounded on purpose. If SearchHost insists on the foreground, this should
+    // give up and say so rather than trade activations with it forever.
+    static int attempts = 0;
+    if (++attempts > 60) {
+        return;
+    }
+    try {
+        HWND ours = nullptr;
+        EnumWindows(
+            [](HWND hwnd, LPARAM param) -> BOOL {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(hwnd, &pid);
+                if (pid != GetCurrentProcessId()) {
+                    return TRUE;
+                }
+                wchar_t cls[128] = {};
+                GetClassNameW(hwnd, cls, ARRAYSIZE(cls));
+                if (wcscmp(cls, L"Windows.UI.Core.CoreWindow") == 0) {
+                    *reinterpret_cast<HWND*>(param) = hwnd;
+                    return FALSE;
+                }
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&ours));
+        if (!ours) {
+            Rec(L"foreground: no CoreWindow of ours to activate");
+            return;
+        }
+
+        HWND current = GetForegroundWindow();
+        if (current == ours) {
+            static bool said = false;
+            if (!said) {
+                said = true;
+                Rec(L"foreground: already ours");
+            }
+            return;
+        }
+
+        DWORD theirThread = GetWindowThreadProcessId(current, nullptr);
+        DWORD ourThread = GetCurrentThreadId();
+        bool attached = false;
+        if (theirThread && theirThread != ourThread) {
+            attached = AttachThreadInput(ourThread, theirThread, TRUE) != FALSE;
+        }
+        BOOL ok = SetForegroundWindow(ours);
+        if (attached) {
+            AttachThreadInput(ourThread, theirThread, FALSE);
+        }
+        Rec(L"foreground: SetForegroundWindow -> %d (attached=%d)", ok ? 1 : 0,
+            attached ? 1 : 0);
+    } catch (...) {
+    }
+}
+
+// Brings our window back a tick later.
+//
+// A tick, because doing it inside the focus change that is still in progress
+// is overridden immediately -- the same reason the first LostFocus attempt
+// failed.
+void RestoreWindowSoon() {
+    try {
+        auto back = wux::DispatcherTimer();
+        back.Interval(std::chrono::milliseconds(60));
+        back.Tick([back](wf::IInspectable const&, wf::IInspectable const&) {
+            back.Stop();
+            TakeForeground();
+            if (g_ourBox) {
+                auto now = wux::Input::FocusManager::GetFocusedElement();
+                // A click on something real should win; only take the element
+                // back when nothing else has it.
+                if (!now || now.try_as<wuxc::ScrollViewer>()) {
+                    g_ourBox.Focus(wux::FocusState::Programmatic);
+                }
+            }
+        });
+        back.Start();
+        g_refocus = back;
+    } catch (...) {
+    }
+}
 
 void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
     if (g_ourBox) {
@@ -269,11 +386,62 @@ void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
     wuxc::TextBox box;
     box.Name(L"WindhawkStartSearchBox");
     box.PlaceholderText(L"Search with Everything");
+    box.FontSize(14);
     // Matched to the button it replaces: 768x32 inside a 772x64 cell.
     box.Width(stockButton.ActualWidth() > 0 ? stockButton.ActualWidth() : 768);
     box.Height(stockButton.ActualHeight() > 0 ? stockButton.ActualHeight() : 32);
     box.HorizontalAlignment(wux::HorizontalAlignment::Center);
     box.VerticalAlignment(wux::VerticalAlignment::Center);
+
+    // Transparent, borderless, and appended after the stock button so it is
+    // drawn over it. The chrome underneath is Microsoft's; only the text and
+    // the caret are ours, which is why this looks native rather than like a
+    // control bolted on.
+    try {
+        wuxm::SolidColorBrush clear{winrt::Windows::UI::Colors::Transparent()};
+        box.Background(clear);
+        box.BorderThickness(wux::ThicknessHelper::FromUniformLength(0));
+        // The stock box indents its text past the magnifier; match it so the
+        // caret does not sit on top of the icon.
+        // Top padding rather than alignment: the glyphs sit high in the
+        // line box, so centring the line still leaves the text looking
+        // high against Microsoft's chrome.
+        box.Padding(wux::ThicknessHelper::FromLengths(40, 6, 8, 0));
+        // A TextBox centres its text by VerticalContentAlignment, not by
+        // padding, and its default MinHeight is taller than the 32px box we
+        // are sitting in -- which is what pushed the text off centre.
+        box.VerticalContentAlignment(wux::VerticalAlignment::Center);
+        box.VerticalAlignment(wux::VerticalAlignment::Stretch);
+        box.MinHeight(0);
+
+        // Setting Background is not enough. A TextBox paints its own
+        // background and border from theme brushes chosen by visual state, so
+        // resting looks clear while hover and focus put a lighter slab back
+        // over Microsoft's chrome -- which is what showed up on screen. These
+        // are the brushes that template reads; overriding them on the element
+        // covers every state.
+        static const wchar_t* kClearKeys[] = {
+            L"TextControlBackground",
+            L"TextControlBackgroundPointerOver",
+            L"TextControlBackgroundFocused",
+            L"TextControlBackgroundDisabled",
+            L"TextControlBorderBrush",
+            L"TextControlBorderBrushPointerOver",
+            L"TextControlBorderBrushFocused",
+            L"TextControlBorderBrushDisabled",
+            L"TextControlButtonBackground",
+            L"TextControlButtonBackgroundPointerOver",
+            L"TextControlButtonBackgroundPressed",
+        };
+        for (const wchar_t* key : kClearKeys) {
+            box.Resources().Insert(winrt::box_value(winrt::hstring{key}),
+                                   wuxm::SolidColorBrush{
+                                       winrt::Windows::UI::Colors::Transparent()});
+        }
+    } catch (...) {
+        Rec(L"own box: could not clear the chrome %08X",
+            static_cast<unsigned>(winrt::to_hresult()));
+    }
 
     cell.Children().Append(box);
     g_ourBox = box;
@@ -288,53 +456,22 @@ void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
             }
         });
 
-    // Focus, when the menu becomes active.
+    // Listening, rather than holding focus.
     //
-    // Waiting to be clicked was not enough: with the box unfocused, typing
-    // went to the search host as before. Taking it here is not the same
-    // gamble it was in the search host either -- there the host had its own
-    // box and wanted focus back every half second, whereas here the only
-    // other candidate, SearchBoxToggleButton, has been collapsed.
+    // Two focus-based attempts failed. Grabbing it on LostFocus ran in the
+    // middle of input processing and was overridden immediately -- the box lit
+    // up on mouse-down and went dark on mouse-up. Polling for it with a timer
+    // worked but was blunt: it would take focus back from anything in the menu
+    // that legitimately wanted it, including keyboard navigation of the app
+    // list.
     //
-    // Window::Current() may be null if this ever becomes a XAML island, as
-    // the Control Center already is, so the result is logged rather than
-    // assumed.
-    try {
-        auto window = wux::Window::Current();
-        if (!window) {
-            Rec(L"own box: no Window::Current() -- cannot hook activation");
-        } else {
-            window.Activated([](wf::IInspectable const&,
-                                wuc::WindowActivatedEventArgs const& args) {
-                if (args.WindowActivationState() ==
-                    wuc::CoreWindowActivationState::Deactivated) {
-                    return;
-                }
-                if (!g_ourBox) {
-                    return;
-                }
-                bool took = g_ourBox.Focus(wux::FocusState::Programmatic);
-                Rec(L"own box: menu activated, Focus() -> %d", took ? 1 : 0);
-            });
-            Rec(L"own box: watching window activation for focus");
-        }
-    } catch (...) {
-        Rec(L"own box: activation hook threw %08X",
-            static_cast<unsigned>(winrt::to_hresult()));
-    }
-
-    // Type anywhere in the menu and it goes to our box.
+    // So nothing here takes focus at all. The characters are read at the
+    // window as they arrive, which is what the stock menu does too -- typing
+    // anywhere starts a search there, without the box being focused first.
     //
-    // Focus alone is not enough: click the menu's body and focus leaves the
-    // box, and the next keystroke goes to the search host instead -- which is
-    // how the stock menu behaves, since typing anywhere is meant to start a
-    // search. Rather than fight to keep focus (that approach made the box
-    // unusable when it was tried in the search host), take the characters at
-    // the window, where they arrive before anything decides what to do with
-    // them.
-    //
-    // Only when our box does not already have focus: when it does, the box
-    // handles its own input and appending here would double every letter.
+    // When the box does have focus, because it was clicked, it handles its own
+    // input and this stays out of the way; otherwise every letter would be
+    // doubled.
     try {
         if (auto window = wux::Window::Current()) {
             if (auto core = window.CoreWindow()) {
@@ -359,17 +496,63 @@ void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
                         if (ours && ours == g_ourBox) {
                             return;  // the box is already receiving this
                         }
+                        static bool said = false;
+                        if (!said) {
+                            said = true;
+                            Rec(L"focus: first character arrived while focus "
+                                L"was on %ls",
+                                FocusedElementLabel().c_str());
+                            Rec(L"geometry: our box %.0fx%.0f at padding "
+                                L"top=%.0f",
+                                g_ourBox.ActualWidth(), g_ourBox.ActualHeight(),
+                                g_ourBox.Padding().Top);
+                        }
                         std::wstring text{g_ourBox.Text()};
                         text.push_back(static_cast<wchar_t>(code));
                         g_ourBox.Text(text);
-                        g_ourBox.Focus(wux::FocusState::Programmatic);
+                        // Caret to the end, so clicking into the box later
+                        // continues from where the text does.
                         g_ourBox.SelectionStart(
                             static_cast<int32_t>(text.size()));
-                        Rec(L"own box: took '%c' from the window", code);
                     } catch (...) {
                     }
                 });
-                Rec(L"own box: watching CharacterReceived");
+                // Backspace and Escape never arrive as characters, so the
+                // box would fill up with no way to correct it.
+                core.KeyDown([](wuc::CoreWindow const&,
+                                wuc::KeyEventArgs const& args) {
+                    try {
+                        if (!g_ourBox) {
+                            return;
+                        }
+                        auto focused =
+                            wux::Input::FocusManager::GetFocusedElement();
+                        if (focused && focused.try_as<wuxc::TextBox>()) {
+                            return;  // the box is handling its own editing
+                        }
+                        std::wstring text{g_ourBox.Text()};
+                        if (text.empty()) {
+                            return;
+                        }
+                        auto key = args.VirtualKey();
+                        if (key == winrt::Windows::System::VirtualKey::Back) {
+                            text.pop_back();
+                        } else if (key ==
+                                   winrt::Windows::System::VirtualKey::Escape) {
+                            // Clear rather than close: with text in the box,
+                            // Escape reads as "undo the search".
+                            text.clear();
+                        } else {
+                            return;
+                        }
+                        g_ourBox.Text(text);
+                        g_ourBox.SelectionStart(
+                            static_cast<int32_t>(text.size()));
+                        args.Handled(true);
+                    } catch (...) {
+                    }
+                });
+                Rec(L"own box: listening for characters and edit keys");
             }
         }
     } catch (...) {
@@ -377,19 +560,196 @@ void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
             static_cast<unsigned>(winrt::to_hresult()));
     }
 
-    // And once now, for the opening that is already on screen.
-    if (box.Focus(wux::FocusState::Programmatic)) {
-        Rec(L"own box: took focus immediately");
-    }
-
+    // Where focus actually goes, rather than guessing at it. Logged on every
+    // change, with the element that took it, because three focus strategies
+    // have now failed and none of them said what they were losing to.
+    // When a ScrollViewer takes focus, stop that one being a tab stop.
+    //
+    // The log named the culprit: focus goes to
+    // Windows.UI.Xaml.Controls.ScrollViewer -- the app list's scroll
+    // container, which claims focus as the menu builds.
+    //
+    // Deleting it is not an option: it is what scrolls the apps. Taking it out
+    // of the tab order is, and it leaves scrolling, the wheel and the list's
+    // own items alone. Done only to a ScrollViewer actually caught taking
+    // focus from us, rather than to every one in the tree, so nothing is
+    // disabled on a guess.
+    //
+    // The cost is that Tab may no longer land on the app list. That is a real
+    // regression if anyone navigates the menu that way, and it is the reason
+    // this is worth watching rather than assuming it is free.
     g_ourBoxLost = box.LostFocus(
         winrt::auto_revoke,
         [](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-            Rec(L"own box: lost focus");
+            try {
+                auto focused = wux::Input::FocusManager::GetFocusedElement();
+                if (!focused) {
+                    return;
+                }
+                auto dobj = focused.try_as<wux::DependencyObject>();
+                if (!dobj) {
+                    return;
+                }
+                std::wstring who = ElementLabel(dobj);
+                Rec(L"focus: left our box, went to %ls", who.c_str());
+
+                // The window comes back whatever took focus, not only when
+                // it was the ScrollViewer.
+                //
+                // This branch used to return here for every other case, so
+                // TakeForeground() was unreachable in practice -- the log
+                // showed no foreground line at all while the caret kept
+                // disappearing. What actually happens most of the time is
+                // that focus leaves and returns to our own box, and the
+                // window activation goes to SearchHost in between; an
+                // inactive window draws no caret and the keystrokes go with
+                // the activation.
+                RestoreWindowSoon();
+
+                auto scroller = focused.try_as<wuxc::ScrollViewer>();
+                if (!scroller || !scroller.IsTabStop()) {
+                    return;
+                }
+                static int disarmed = 0;
+                if (disarmed >= 8) {
+                    return;  // something else is going on; stop meddling
+                }
+                ++disarmed;
+                scroller.IsTabStop(false);
+                Rec(L"focus: took %ls out of the tab order (%d)", who.c_str(),
+                    disarmed);
+                // Deferred by a tick. Calling Focus() here runs inside the
+                // focus change that is still in progress, and whatever is
+                // taking focus takes it again immediately afterwards -- the
+                // same reason the earlier LostFocus attempt failed, visible on
+                // screen as the box lighting up on mouse-down and going dark
+                // on mouse-up.
+                if (g_ourBox) {
+                    auto back = wux::DispatcherTimer();
+                    back.Interval(std::chrono::milliseconds(60));
+                    back.Tick([back](wf::IInspectable const&,
+                                     wf::IInspectable const&) {
+                        back.Stop();
+                        if (!g_ourBox) {
+                            return;
+                        }
+                        // The window, not just the element.
+                        //
+                        // Clicking the menu's body hands the foreground back
+                        // to SearchHost, and an inactive window draws no
+                        // caret -- which reads as "the box lost focus" even
+                        // though the log shows focus still on it. So restore
+                        // the window first.
+                        TakeForeground();
+
+                        // A click on something real should still win, so only
+                        // reclaim the element if nothing took it meanwhile.
+                        auto now =
+                            wux::Input::FocusManager::GetFocusedElement();
+                        if (now && !now.try_as<wuxc::ScrollViewer>()) {
+                            return;
+                        }
+                        g_ourBox.Focus(wux::FocusState::Programmatic);
+                    });
+                    back.Start();
+                    g_refocus = back;
+                }
+            } catch (...) {
+            }
         });
+
+    // And once now, for the opening that is already on screen.
+    // Nothing here takes focus, deliberately.
+    //
+    // Three attempts established why. Focusing on placement did not survive
+    // the menu opening. Re-focusing from LostFocus ran in the middle of input
+    // processing and was overridden a moment later -- the box lit up on
+    // mouse-down and went dark on mouse-up. A polling timer held focus but
+    // took it back from anything else in the menu that wanted it, including
+    // keyboard navigation of the app list.
+    //
+    // The listener below reads characters at the window instead, which is
+    // also how the stock menu behaves: typing starts a search without the box
+    // being focused first.
+
 
     Rec(L"own box: placed in %ls (%.0fx%.0f)", ElementLabel(cell).c_str(),
         box.Width(), box.Height());
+
+    // Focus once, when the menu opens -- and then leave it alone.
+    //
+    // The log answered what had been guesswork: focus goes to
+    // Windows.UI.Xaml.Controls.ScrollViewer, the app list. That is the menu's
+    // own doing and it is reasonable, which is why holding focus against it
+    // was the wrong idea -- a polling timer that wins that argument also
+    // breaks arrow-key navigation through the apps.
+    //
+    // Taking it once per opening is different. The ScrollViewer claims focus
+    // while the menu builds; a short delay lands after that, and nothing
+    // takes it again unless the user clicks something, which should win.
+    //
+    // Typing does not depend on this. The character listener already works
+    // whatever has focus; this is for the caret, so the box looks ready.
+    try {
+        if (auto window = wux::Window::Current()) {
+            if (auto core = window.CoreWindow()) {
+                core.VisibilityChanged(
+                    [](wuc::CoreWindow const&,
+                       wuc::VisibilityChangedEventArgs const& args) {
+                        if (!args.Visible() || !g_ourBox) {
+                            return;
+                        }
+                        try {
+                            auto once = wux::DispatcherTimer();
+                            once.Interval(std::chrono::milliseconds(150));
+                            once.Tick([once](wf::IInspectable const&,
+                                             wf::IInspectable const&) {
+                                once.Stop();
+                                // The window first, then the element.
+                                //
+                                // XAML focus inside Start is not enough: the
+                                // foreground window is SearchHost's, measured,
+                                // and an inactive window draws no caret. That
+                                // is why the box filled with text while looking
+                                // dead -- the shell routes characters to this
+                                // window regardless of which one is active.
+                                TakeForeground();
+                                if (g_ourBox) {
+                                    g_ourBox.Focus(
+                                        wux::FocusState::Programmatic);
+                                }
+                            });
+                            once.Start();
+                            g_openFocus = once;
+                        } catch (...) {
+                        }
+                    });
+                Rec(L"own box: will focus once per opening");
+            }
+        }
+    } catch (...) {
+        Rec(L"own box: visibility hook threw %08X",
+            static_cast<unsigned>(winrt::to_hresult()));
+    }
+
+    // A few samples after placement: what holds focus when the menu is up is
+    // the question, and it is not answerable at the moment of placement.
+    try {
+        auto probe = wux::DispatcherTimer();
+        probe.Interval(std::chrono::milliseconds(700));
+        probe.Tick([probe, n = std::make_shared<int>(0)](
+                       wf::IInspectable const&, wf::IInspectable const&) {
+            if (++*n > 8) {
+                probe.Stop();
+                return;
+            }
+            Rec(L"focus: t+%dms on %ls", *n * 700,
+                FocusedElementLabel().c_str());
+        });
+        probe.Start();
+        g_focusProbe = probe;
+    } catch (...) {
+    }
 } catch (...) {
     Rec(L"own box: failed %08X", static_cast<unsigned>(winrt::to_hresult()));
 }
@@ -469,9 +829,31 @@ class VisualTreeWatcher
         Rec(L"SearchBoxToggleButton #%d seen (%.0fx%.0f)", n,
             button.ActualWidth(), button.ActualHeight());
 
-        if (g_settings.hideSearchBox || g_settings.ownSearchBox) {
+        if (g_settings.hideSearchBox) {
             button.Visibility(wux::Visibility::Collapsed);
             Rec(L"  collapsed it");
+        } else if (g_settings.ownSearchBox) {
+            // Keep it, and keep it looking like Windows: the border, the
+            // magnifier and the hover states are all here and worth having.
+            // Only the click has to go -- that is what hands off to the search
+            // host. Left visible but inert, the same treatment that stopped
+            // SearchHost crashing: an element still laid out where its own
+            // code can find it.
+            button.IsHitTestVisible(false);
+            Rec(L"  kept for its chrome, click disabled");
+
+            // Its placeholder and its drawn-on caret would show through
+            // underneath ours.
+            if (auto ph = FindDescendantByName(button, L"PlaceholderText", 6)) {
+                if (auto fe = ph.try_as<wux::FrameworkElement>()) {
+                    fe.Opacity(0.0);
+                }
+            }
+            if (auto caret = FindDescendantByName(button, L"TextCaret", 6)) {
+                if (auto fe = caret.try_as<wux::FrameworkElement>()) {
+                    fe.Opacity(0.0);
+                }
+            }
         }
         if (g_settings.ownSearchBox) {
             PlaceOurSearchBox(button);
@@ -529,6 +911,18 @@ class WindhawkTAP : public winrt::implements<WindhawkTAP, IObjectWithSite,
     HRESULT STDMETHODCALLTYPE SetSite(IUnknown* pUnkSite) override try {
         // The handlers are code in this DLL, and the box is in somebody else's
     // tree; leaving either behind would be a crash on the next keystroke.
+    if (g_focusProbe) {
+        g_focusProbe.Stop();
+        g_focusProbe = nullptr;
+    }
+    if (g_openFocus) {
+        g_openFocus.Stop();
+        g_openFocus = nullptr;
+    }
+    if (g_refocus) {
+        g_refocus.Stop();
+        g_refocus = nullptr;
+    }
     g_ourBoxChanged.revoke();
     g_ourBoxLost.revoke();
     g_ourBox = nullptr;
