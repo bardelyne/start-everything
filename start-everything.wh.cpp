@@ -82,6 +82,9 @@ This build only hides the button and logs what is around it. Output goes to
 // types and must be defined before use.
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include "broker/everything_ipc.h"
+#include "broker/file_ranker.h"
+
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.h>
@@ -106,6 +109,8 @@ This build only hides the button and logs what is around it. Output goes to
 #include <memory>
 #include <string>
 #include <string_view>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -371,6 +376,113 @@ void RestoreWindowSoon() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Asking Everything, from inside the Start menu
+//
+// On its own thread, with its own message pump: the IPC is a WM_COPYDATA
+// round trip and the reply lands on a window, so it cannot run on the XAML
+// thread without blocking the menu while the user types.
+//
+// Debounced, because a keystroke every ~60ms would otherwise be a query every
+// ~60ms. 120ms was measured as comfortable in the broker.
+// ---------------------------------------------------------------------------
+
+[[clang::no_destroy]] std::thread g_searchThread;
+[[clang::no_destroy]] std::mutex g_queryMutex;
+[[clang::no_destroy]] std::condition_variable g_queryWake;
+[[clang::no_destroy]] std::wstring g_pendingQuery;
+std::atomic<bool> g_searchQuit{false};
+std::atomic<bool> g_queryDirty{false};
+
+// Results, handed from the search thread to the XAML thread.
+[[clang::no_destroy]] std::mutex g_resultsMutex;
+[[clang::no_destroy]] std::vector<everything::Result> g_results;
+std::atomic<DWORD> g_totalMatches{0};
+
+void QueueQuery(std::wstring text) {
+    {
+        std::lock_guard<std::mutex> lock(g_queryMutex);
+        g_pendingQuery = std::move(text);
+    }
+    g_queryDirty.store(true);
+    g_queryWake.notify_all();
+}
+
+void SearchThreadMain() {
+    everything::Client client;
+    if (!client.Init()) {
+        Rec(L"search: could not create the reply window");
+        return;
+    }
+    Rec(L"search: ready (Everything %ls)",
+        everything::FindIpcWindow() ? L"found" : L"NOT running");
+
+    std::wstring last;
+    while (!g_searchQuit.load()) {
+        std::wstring query;
+        {
+            std::unique_lock<std::mutex> lock(g_queryMutex);
+            g_queryWake.wait_for(lock, std::chrono::milliseconds(200), [] {
+                return g_queryDirty.load() || g_searchQuit.load();
+            });
+            if (g_searchQuit.load()) {
+                return;
+            }
+            if (!g_queryDirty.exchange(false)) {
+                continue;
+            }
+            query = g_pendingQuery;
+        }
+
+        // Settle: if more was typed while we waited, search the newer text
+        // rather than the older.
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        {
+            std::lock_guard<std::mutex> lock(g_queryMutex);
+            if (g_pendingQuery != query) {
+                g_queryDirty.store(true);
+                continue;
+            }
+        }
+
+        if (query == last) {
+            continue;
+        }
+        last = query;
+
+        if (query.empty()) {
+            std::lock_guard<std::mutex> lock(g_resultsMutex);
+            g_results.clear();
+            g_totalMatches.store(0);
+            continue;
+        }
+
+        std::vector<everything::Result> pool;
+        DWORD total = 0;
+        auto start = std::chrono::steady_clock::now();
+        bool ok = client.Query(query, ranker::kDefaultPool, &pool, &total);
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - start)
+                      .count();
+        if (!ok) {
+            Rec(L"search: '%ls' failed (Everything running?)", query.c_str());
+            continue;
+        }
+
+        ranker::Rank(&pool, query, 12);
+        {
+            std::lock_guard<std::mutex> lock(g_resultsMutex);
+            g_results = pool;
+            g_totalMatches.store(total);
+        }
+        Rec(L"search: '%ls' -> %u matches, kept %zu (%lld ms)", query.c_str(),
+            total, pool.size(), static_cast<long long>(ms));
+        for (size_t i = 0; i < pool.size() && i < 5; ++i) {
+            Rec(L"    %ls  %ls", pool[i].name.c_str(), pool[i].path.c_str());
+        }
+    }
+}
+
 void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
     if (g_ourBox) {
         return;  // one per session; the menu is not rebuilt per opening
@@ -451,7 +563,9 @@ void PlaceOurSearchBox(wux::FrameworkElement const& stockButton) try {
         [](wf::IInspectable const& sender, wuxc::TextChangedEventArgs const&) {
             try {
                 auto b = sender.as<wuxc::TextBox>();
-                Rec(L"own box: '%ls'", std::wstring{b.Text()}.c_str());
+                std::wstring text{b.Text()};
+                Rec(L"own box: '%ls'", text.c_str());
+                QueueQuery(std::move(text));
             } catch (...) {
             }
         });
@@ -1084,6 +1198,9 @@ BOOL Wh_ModInit() {
 
 void Wh_ModAfterInit() {
     Rec(L"=== attached to pid %lu ===", GetCurrentProcessId());
+
+    g_searchQuit.store(false);
+    g_searchThread = std::thread(SearchThreadMain);
     g_quit.store(false);
     g_tapThread = std::thread([] {
         for (int attempt = 0; attempt < 120 && !g_quit.load(); ++attempt) {
@@ -1113,6 +1230,14 @@ BOOL Wh_ModSettingsChanged(BOOL* bReload) {
 
 void Wh_ModUninit() {
     Wh_Log(L">");
+
+    // Before anything else: it owns a window and a pump, and its code is in
+    // this image.
+    g_searchQuit.store(true);
+    g_queryWake.notify_all();
+    if (g_searchThread.joinable()) {
+        g_searchThread.join();
+    }
     g_quit.store(true);
     if (g_tapThread.joinable()) {
         g_tapThread.join();
