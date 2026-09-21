@@ -1,4 +1,4 @@
-# Everything Results in the Start Menu
+# Everything & Power Tools in the Start Menu
 
 [![Platform](https://img.shields.io/badge/Windows-11%20(22H2%20--%2024H2)-blue.svg)](#requirements)
 [![Engine](https://img.shields.io/badge/Windhawk-Mod-success.svg)](https://windhawk.net/)
@@ -7,7 +7,7 @@
 
 A high-performance, native replacement for Windows 11 Start Menu search powered directly by voidtools Everything. Completely severs SearchHost background telemetry, Bing web queries, and Edge WebView2 processes, replacing them with instantaneous sub-millisecond local file, application, and settings search directly inside the Start Menu.
 
-![Everything Results in the Start Menu](screenshot.png)
+![Everything & Power Tools in the Start Menu](screenshot.png)
 
 ---
 
@@ -119,7 +119,7 @@ When right-clicking any file, folder, or application backed by a file on disk:
 
 ## Mod Settings and Customization
 
-All settings can be customized in the Windhawk UI under **Everything results in the Start menu** > **Settings**:
+All settings can be customized in the Windhawk UI under **Everything & Power Tools in the Start Menu** > **Settings**:
 
 - **Max App Results**: Number of application matches displayed in the Apps column (default 6).
 - **Max File Results**: Number of file matches displayed in the Files column (default 12).
