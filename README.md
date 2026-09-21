@@ -59,20 +59,20 @@ graph TD
         EV["Everything.exe / Everything64.exe (IPC Window)"]
     end
 
-    T -- "Win Key / Open" --> SM
-    KL -- "Any Keystroke" --> PAL
-    TRIG -- "Click" --> PAL
+    T -->|"Win Key / Open"| SM
+    KL -->|"Any Keystroke"| PAL
+    TRIG -->|"Click"| PAL
     PAL --> BOX
-    BOX -- "Query Text" --> APPS
-    BOX -- "Tools (/c, /ip)" --> TOOLS
-    BOX -- "WM_COPYDATA IPC" --> EV
-    EV -- "Instant Results (<5ms)" --> PAL
-    APPS -- "Instant App Hits" --> PAL
-    TOOLS -- "Utility Cards" --> PAL
+    BOX -->|"Query Text"| APPS
+    BOX -->|"Tools (/c, /ip)"| TOOLS
+    BOX -->|"WM_COPYDATA IPC"| EV
+    EV -->|"Instant Results (<5ms)"| PAL
+    APPS -->|"Instant App Hits"| PAL
+    TOOLS -->|"Utility Cards"| PAL
 
-    VM -- "Blocked by Hook" -.-> WV
-    VM -- "Blocked by Hook" -.-> BING
-    FOC -- "Preserves Focus" --> SM
+    VM -.->|"Blocked by Hook"| WV
+    VM -.->|"Blocked by Hook"| BING
+    FOC -->|"Preserves Focus"| SM
 ```
 
 ---
