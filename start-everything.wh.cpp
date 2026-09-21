@@ -19,6 +19,8 @@
 
 A high-performance, native replacement for Windows 11 Start Menu search powered directly by voidtools Everything. Completely severs SearchHost background telemetry, Bing web queries, and Edge WebView2 processes, replacing them with instantaneous sub-millisecond local file, application, and settings search directly inside the Start Menu.
 
+![Everything Results in the Start Menu](https://raw.githubusercontent.com/bardelyne/start-everything/main/screenshot.png)
+
 ## Key Features
 
 - Instant Everything Search: Sub-millisecond file querying directly through the voidtools Everything Win32 IPC interface. Instant results across millions of files without background indexing lag or disk thrashing.
