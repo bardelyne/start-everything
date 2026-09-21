@@ -26,7 +26,7 @@ $args = @(
     "-Wl,--export-all-symbols",
     "-o", $outPath,
     "-x", "c++", (Join-Path $PSScriptRoot "start-everything.wh.cpp"),
-    "-lwindhawk", "-lole32", "-loleaut32", "-lruntimeobject", "-luuid", "-lshell32", "-lshlwapi", "-lcomctl32", "-ldwmapi", "-luser32", "-liphlpapi"
+    "-lwindhawk", "-lole32", "-loleaut32", "-lruntimeobject", "-luuid", "-lshell32", "-lshlwapi", "-lcomctl32", "-ldwmapi", "-luser32", "-liphlpapi", "-lgdi32"
 )
 
 & $cxx @args
