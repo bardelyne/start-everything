@@ -2,3 +2,9 @@
 *.dll
 *.log
 nul*
+scratch/
+claude-notap/
+claude-teardown-fix/
+install_v3.sh
+searchhost-disconnect-v3.wh.cpp
+*.wh.cpp.bak
