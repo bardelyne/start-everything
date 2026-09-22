@@ -158,7 +158,7 @@ When using Windhawk's Windows 11 Start Menu Styler or custom system themes:
 
 ## Requirements
 
-1. **Windows 11**: Supports versions `22H2`, `23H2`, and `24H2` (`x86-64`).
+1. **Windows 11**: Supports versions `22H2+`.
 2. **voidtools Everything**: Either **Everything 1.4** or **Everything 1.5a** running in the background. Download from [https://www.voidtools.com/](https://www.voidtools.com/).
 3. **Windhawk**: Download and install [Windhawk](https://windhawk.net/) (version 1.4 or newer).
 
