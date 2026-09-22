@@ -1,5 +1,5 @@
 $timestamp = (Get-Date -Format 'HHmmss')
-$name = "local@start-everything_0.3_$timestamp.dll"
+$name = "local@start-everything_1.0_$timestamp.dll"
 $modsDir = "C:\ProgramData\Windhawk\Engine\Mods\64"
 $outPath = Join-Path $modsDir $name
 
@@ -44,7 +44,7 @@ Set-ItemProperty $k -Name 'LibraryFileName' -Value $name
 Set-ItemProperty $k -Name 'Include' -Value 'StartMenuExperienceHost.exe|SearchHost.exe|explorer.exe'
 Set-ItemProperty $k -Name 'Exclude' -Value ''
 Set-ItemProperty $k -Name 'Architecture' -Value 'x86-64'
-Set-ItemProperty $k -Name 'Version' -Value '0.3'
+Set-ItemProperty $k -Name 'Version' -Value '1.0'
 Set-ItemProperty $k -Name 'Disabled' -Value 0 -Type DWord
 Set-ItemProperty $k -Name 'SettingsChangeTime' -Value ([int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -Type DWord
 
