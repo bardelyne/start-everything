@@ -1,6 +1,6 @@
 # Everything & Power Tools in the Start Menu
 
-[![Platform](https://img.shields.io/badge/Windows-11%20(22H2%20--%2024H2)-blue.svg)](#requirements)
+[![Platform](https://img.shields.io/badge/Windows-11%20(22H2%20--%2025H2)-blue.svg)](#requirements)
 [![Engine](https://img.shields.io/badge/Windhawk-Mod-success.svg)](https://windhawk.net/)
 [![Everything](https://img.shields.io/badge/voidtools-Everything%20v1.4%20%7C%20v1.5a-orange.svg)](https://www.voidtools.com/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
