@@ -19,7 +19,7 @@ A high-performance, native replacement for Windows 11 Start Menu search powered 
 - **Inline Calculator**: Type `/c <expression>` (e.g. `/c 100 * 5`, `/c sqrt(144)`, `/c 15% of 200`, `/c 2^10`) to calculate math on the fly. Press Enter to copy the result directly to your clipboard.
 - **Configurable Unit Conversions**: Type `/c <number> [unit]` to run unit conversions driven entirely by formulas defined in Mod Settings. Users can add, edit, or delete conversions item-by-item from the settings UI.
 - **Network Interface Inspector**: Type `/ip` to display all active Wi-Fi, Ethernet, and VPN network interfaces with their IP addresses, subnet masks, gateways, and hardware descriptions. Press Enter to copy the IP.
-- **Full Right-Click Context Menu**: Right-click any file or folder to Open, Run as Administrator, Cut (native shell file move), Copy (native shell file duplicate), Copy path, or Open file location.
+- **Full Right-Click Context Menu**: Right-click any file, folder, or application to Open, Run as Administrator, Create desktop shortcut, Cut (native shell file move), Copy (native shell file duplicate), Copy path, or Open file location.
 - **Explicit Web Search**: Trigger web searches on demand using the `?` prefix (e.g. `?query`). Includes customizable keyword shortcuts such as `?yt` (YouTube), `?gh` (GitHub), `?w` (Wikipedia), and `?r` (Reddit).
 - **Start Menu Styler Compatibility**: Automatically adopts background styles (Tinted Glass, Acrylic, custom theme colors) in real time without needing to restart the mod.
 - **Robust Win32 Key Listener**: Combines a `WH_GETMESSAGE` UI thread hook, HWND subclassing, and XAML CoreWindow handling to ensure zero dropped keystrokes.
@@ -99,16 +99,17 @@ graph TD
 | **Enter** | Launch selected application, copy calculation/conversion/IP result, or open item |
 | **Ctrl + Enter** | Run selected application or file as Administrator (triggers UAC) |
 | **Escape** | Clear search text and smoothly collapse search palette back to pinned apps |
-| **Right-Click** | Open context menu (Open, Run as administrator, Cut, Copy, Copy path, Open file location) |
+| **Right-Click** | Open context menu (Open, Run as administrator, Create desktop shortcut, Cut, Copy, Copy path, Open file location) |
 
 ---
 
 ## Right-Click Context Menu Actions
 
-When right-clicking any file, folder, or application backed by a file on disk:
+When right-clicking any file, folder, or application:
 
 - **Open**: Opens the file or launches the application.
 - **Run as administrator**: Launches executables, scripts (`.bat`, `.cmd`, `.ps1`), shortcuts (`.lnk`), and management consoles (`.msc`) with elevated administrative privileges.
+- **Create desktop shortcut**: Instantly creates a `.lnk` shortcut on the user's Desktop for files, folders, Win32 apps, or UWP packages.
 - **Cut**: Places the file on the Windows clipboard using shell `CF_HDROP` with `DROPEFFECT_MOVE`. Pasting in any File Explorer folder or Desktop moves the file.
 - **Copy**: Places the file on the Windows clipboard using shell `CF_HDROP` with `DROPEFFECT_COPY`. Pasting in any File Explorer folder or Desktop duplicates the file.
 - **Copy path**: Copies the absolute file path as plain text (`CF_UNICODETEXT`).
