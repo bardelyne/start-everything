@@ -3188,6 +3188,7 @@ inline std::vector<UnitConversionResult> GenerateCommonConversions(double n) {
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Media.Animation.h>
@@ -3224,6 +3225,8 @@ namespace wuc = winrt::Windows::UI::Core;
 namespace wux = winrt::Windows::UI::Xaml;
 namespace wuxc = winrt::Windows::UI::Xaml::Controls;
 namespace wuxcp = winrt::Windows::UI::Xaml::Controls::Primitives;
+namespace wuxi = winrt::Windows::UI::Xaml::Input;
+namespace wui = winrt::Windows::UI::Input;
 namespace wuxm = winrt::Windows::UI::Xaml::Media;
 namespace wuxmi = winrt::Windows::UI::Xaml::Media::Imaging;
 namespace wuxma = winrt::Windows::UI::Xaml::Media::Animation;
@@ -4913,6 +4916,66 @@ void OpenFileLocation(std::wstring path) {
     });
 }
 
+void ShowPropertiesDialog(std::wstring path) {
+    SpawnTrackedLaunch([path = std::move(path)] {
+        HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_INVOKEIDLIST;
+        sei.lpVerb = L"properties";
+        sei.lpFile = path.c_str();
+        sei.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&sei)) {
+            SHObjectProperties(nullptr, 0x00000002 /* SHOP_FILEPATH */, path.c_str(), nullptr);
+        }
+        if (SUCCEEDED(comHr)) {
+            CoUninitialize();
+        }
+    });
+}
+
+void LaunchTerminal(const std::wstring& dir, bool isPowerShell, bool asAdmin) {
+    SpawnTrackedLaunch([dir, isPowerShell, asAdmin] {
+        HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (isPowerShell) {
+            std::wstring psTarget = dir;
+            size_t pos = 0;
+            while ((pos = psTarget.find(L'\'', pos)) != std::wstring::npos) {
+                psTarget.insert(pos, L"'");
+                pos += 2;
+            }
+            std::wstring params = L"-NoExit -Command Set-Location -LiteralPath '" + psTarget + L"'";
+            SHELLEXECUTEINFOW sei{};
+            sei.cbSize = sizeof(sei);
+            sei.fMask = SEE_MASK_NOASYNC;
+            sei.lpVerb = asAdmin ? L"runas" : L"open";
+            sei.lpFile = L"powershell.exe";
+            sei.lpParameters = params.c_str();
+            sei.lpDirectory = dir.c_str();
+            sei.nShow = SW_SHOWNORMAL;
+            ShellExecuteExW(&sei);
+        } else {
+            std::wstring cmdTarget = dir;
+            if (cmdTarget.size() > 3 && cmdTarget.back() == L'\\') {
+                cmdTarget.pop_back();
+            }
+            std::wstring params = L"/K cd /d \"" + cmdTarget + (cmdTarget.back() == L'\\' ? L"\\\"" : L"\"");
+            SHELLEXECUTEINFOW sei{};
+            sei.cbSize = sizeof(sei);
+            sei.fMask = SEE_MASK_NOASYNC;
+            sei.lpVerb = asAdmin ? L"runas" : L"open";
+            sei.lpFile = L"cmd.exe";
+            sei.lpParameters = params.c_str();
+            sei.lpDirectory = dir.c_str();
+            sei.nShow = SW_SHOWNORMAL;
+            ShellExecuteExW(&sei);
+        }
+        if (SUCCEEDED(comHr)) {
+            CoUninitialize();
+        }
+    });
+}
+
 inline bool CopyTextToClipboard(const std::wstring& text) {
     if (text.empty()) return false;
     if (!OpenClipboard(nullptr)) return false;
@@ -5897,6 +5960,20 @@ void RenderResults() try {
                         tools::CreateDesktopShortcut(locTarget, appTitle);
                     });
                     flyout.Items().Append(shortcutItem);
+
+                    wuxc::MenuFlyoutSeparator sep2;
+                    flyout.Items().Append(sep2);
+
+                    wuxc::MenuFlyoutItem propItem;
+                    propItem.Text(L"Properties");
+                    wuxc::FontIcon propIcon;
+                    propIcon.Glyph(L"\uE946");
+                    propItem.Icon(propIcon);
+                    propItem.Click([locTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                        DismissStartMenu();
+                        ShowPropertiesDialog(locTarget);
+                    });
+                    flyout.Items().Append(propItem);
                 } else if (!locTarget.starts_with(L"ms-settings:") && !locTarget.starts_with(L"http:") && !locTarget.starts_with(L"https:")) {
                     wuxc::MenuFlyoutSeparator sep1;
                     flyout.Items().Append(sep1);
@@ -6178,6 +6255,63 @@ void RenderResults() try {
                 flyout.Items().Append(adminItem);
             }
 
+            DWORD attr = GetFileAttributesW(target.c_str());
+            bool isFolder = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
+            if (isFolder) {
+                wuxc::MenuFlyoutSubItem termSub;
+                termSub.Text(L"Open in terminal");
+                wuxc::FontIcon termIcon;
+                termIcon.Glyph(L"\uE756");
+                termSub.Icon(termIcon);
+
+                auto bindTerminalItem = [target](wuxc::MenuFlyoutItem const& mi, bool isPowerShell) {
+                    mi.Click([target, isPowerShell](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                        DismissStartMenu();
+                        LaunchTerminal(target, isPowerShell, /*asAdmin=*/false);
+                    });
+
+                    auto runAdmin = [target, isPowerShell]() {
+                        static std::atomic<ULONGLONG> s_lastAdmin{0};
+                        ULONGLONG now = GetTickCount64();
+                        ULONGLONG prev = s_lastAdmin.load(std::memory_order_relaxed);
+                        if (now - prev < 800) return;
+                        s_lastAdmin.store(now, std::memory_order_relaxed);
+                        DismissStartMenu();
+                        LaunchTerminal(target, isPowerShell, /*asAdmin=*/true);
+                    };
+
+                    mi.RightTapped([runAdmin](wf::IInspectable const&, wuxi::RightTappedRoutedEventArgs const& e) {
+                        e.Handled(true);
+                        runAdmin();
+                    });
+
+                    mi.PointerPressed([runAdmin](wf::IInspectable const&, wuxi::PointerRoutedEventArgs const& e) {
+                        if (e.GetCurrentPoint(nullptr).Properties().IsRightButtonPressed()) {
+                            e.Handled(true);
+                            runAdmin();
+                        }
+                    });
+                };
+
+                wuxc::MenuFlyoutItem cmdItem;
+                cmdItem.Text(L"Command Prompt");
+                wuxc::FontIcon cmdIcon;
+                cmdIcon.Glyph(L"\uE756");
+                cmdItem.Icon(cmdIcon);
+                bindTerminalItem(cmdItem, /*isPowerShell=*/false);
+                termSub.Items().Append(cmdItem);
+
+                wuxc::MenuFlyoutItem psItem;
+                psItem.Text(L"PowerShell");
+                wuxc::FontIcon psIcon;
+                psIcon.Glyph(L"\uE756");
+                psItem.Icon(psIcon);
+                bindTerminalItem(psItem, /*isPowerShell=*/true);
+                termSub.Items().Append(psItem);
+
+                flyout.Items().Append(termSub);
+            }
+
             wuxc::MenuFlyoutSeparator sep1;
             flyout.Items().Append(sep1);
 
@@ -6235,6 +6369,20 @@ void RenderResults() try {
                 tools::CreateDesktopShortcut(target, title);
             });
             flyout.Items().Append(shortcutItem);
+
+            wuxc::MenuFlyoutSeparator sep3;
+            flyout.Items().Append(sep3);
+
+            wuxc::MenuFlyoutItem propItem;
+            propItem.Text(L"Properties");
+            wuxc::FontIcon propIcon;
+            propIcon.Glyph(L"\uE946");
+            propItem.Icon(propIcon);
+            propItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                DismissStartMenu();
+                ShowPropertiesDialog(target);
+            });
+            flyout.Items().Append(propItem);
 
             button.ContextFlyout(flyout);
         }
