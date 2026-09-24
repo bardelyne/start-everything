@@ -223,6 +223,34 @@ All searches will now seamlessly route through the native Start Menu (Windows Ke
 #include <shlwapi.h>
 #include <limits>
 
+// {0DD79AE2-D156-45D4-BEE9-C16B9EB81D40}
+DEFINE_GUID(IID_IPinnedList3, 0x0dd79ae2, 0xd156, 0x45d4, 0xbe, 0xe9, 0xc1, 0x6b, 0x9e, 0xb8, 0x1d, 0x40);
+// {90C55F39-0524-4B0F-871B-D3F3EF4D1164}
+DEFINE_GUID(CLSID_TaskbarPin, 0x90c55f39, 0x0524, 0x4b0f, 0x87, 0x1b, 0xd3, 0xf3, 0xef, 0x4d, 0x11, 0x64);
+
+#ifndef __IPinnedList3_INTERFACE_DEFINED__
+#define __IPinnedList3_INTERFACE_DEFINED__
+MIDL_INTERFACE("0DD79AE2-D156-45D4-BEE9-C16B9EB81D40")
+IPinnedList3 : public IUnknown {
+public:
+    virtual HRESULT STDMETHODCALLTYPE EnumObjects(IEnumIDList **ppEnum) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPidl(IShellItem *pItem, PIDLIST_ABSOLUTE *ppidl) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetAppIDForPidl(PCIDLIST_ABSOLUTE pidl, LPWSTR *ppszAppID) = 0;
+    virtual HRESULT STDMETHODCALLTYPE ItemIsPinned(IShellItem *pItem) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Modify(PCIDLIST_ABSOLUTE pidlUnpin, PCIDLIST_ABSOLUTE pidlPin) = 0;
+};
+#endif
+
+inline constexpr ULONG_PTR kBrokerActionPinTaskbar = 1;
+inline constexpr ULONG_PTR kBrokerActionPinStart = 2;
+inline constexpr ULONG_PTR kBrokerActionContextMenu = 3;
+
+struct BrokerMenuRequest {
+    int x;
+    int y;
+    wchar_t path[1024];
+};
+
 inline HMODULE GetCurrentModuleHandle() {
     HMODULE module = nullptr;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -3388,6 +3416,248 @@ static void WINAPI Hook_Explorer_SwitchToThisWindow(HWND hWnd, BOOL fAltTab) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Explorer Shell Broker (Context Menu & Pinning)
+// ---------------------------------------------------------------------------
+
+static std::thread g_explorerBrokerThread;
+static std::atomic<bool> g_explorerBrokerRunning{false};
+static HWND g_hExplorerBrokerWnd = nullptr;
+static DWORD g_explorerBrokerThreadId = 0;
+static IContextMenu2* g_pActiveMenu2 = nullptr;
+static IContextMenu3* g_pActiveMenu3 = nullptr;
+
+static bool PinItemInExplorer(const wchar_t* pathOrTarget, bool toTaskbar) {
+    std::wstring parseName = pathOrTarget ? pathOrTarget : L"";
+    if (parseName.empty()) return false;
+
+    if (!parseName.starts_with(L"shell:") && !parseName.starts_with(L"\\\\") &&
+        (parseName.length() < 2 || parseName[1] != L':')) {
+        parseName = L"shell:AppsFolder\\" + parseName;
+    }
+
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    HRESULT hr = SHParseDisplayName(parseName.c_str(), nullptr, &pidl, 0, nullptr);
+    if (FAILED(hr) || !pidl) {
+        Wh_Log(L"[explorer] PinItem: SHParseDisplayName failed (%08X) for %ls", (unsigned)hr, parseName.c_str());
+        return false;
+    }
+
+    bool success = false;
+
+    if (toTaskbar) {
+        IPinnedList3* pPinned = nullptr;
+        hr = CoCreateInstance(CLSID_TaskbarPin, nullptr, CLSCTX_INPROC_SERVER, IID_IPinnedList3, (void**)&pPinned);
+        if (SUCCEEDED(hr) && pPinned) {
+            hr = pPinned->Modify(nullptr, pidl);
+            Wh_Log(L"[explorer] PinItem: IPinnedList3->Modify returned %08X for %ls", (unsigned)hr, parseName.c_str());
+            if (SUCCEEDED(hr)) {
+                success = true;
+            }
+            pPinned->Release();
+        }
+    }
+
+    if (!success) {
+        IShellFolder* pFolder = nullptr;
+        PCUITEMID_CHILD childPidl = nullptr;
+        hr = SHBindToParent(pidl, IID_IShellFolder, (void**)&pFolder, &childPidl);
+        if (SUCCEEDED(hr) && pFolder) {
+            IContextMenu* pContextMenu = nullptr;
+            hr = pFolder->GetUIObjectOf(nullptr, 1, &childPidl, IID_IContextMenu, nullptr, (void**)&pContextMenu);
+            if (SUCCEEDED(hr) && pContextMenu) {
+                HMENU hMenu = CreatePopupMenu();
+                if (hMenu) {
+                    hr = pContextMenu->QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_EXTENDEDVERBS);
+                    if (SUCCEEDED(hr)) {
+                        const char* targetVerb = toTaskbar ? "taskbarpin" : "startpin";
+                        const wchar_t* targetVerbW = toTaskbar ? L"taskbarpin" : L"startpin";
+
+                        CMINVOKECOMMANDINFOEX info = { sizeof(info) };
+                        info.fMask = CMIC_MASK_UNICODE | CMIC_MASK_FLAG_NO_UI;
+                        info.lpVerb = targetVerb;
+                        info.lpVerbW = targetVerbW;
+                        info.nShow = SW_SHOWNORMAL;
+                        HRESULT hrInvoke = pContextMenu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+                        Wh_Log(L"[explorer] PinItem: InvokeCommand(%hs) returned %08X for %ls", targetVerb, (unsigned)hrInvoke, parseName.c_str());
+                        if (SUCCEEDED(hrInvoke)) {
+                            success = true;
+                        }
+                    }
+                    DestroyMenu(hMenu);
+                }
+                pContextMenu->Release();
+            }
+            pFolder->Release();
+        }
+    }
+
+    ILFree(pidl);
+    return success;
+}
+
+static void ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, int x, int y) {
+    std::wstring parseName = pathOrTarget ? pathOrTarget : L"";
+    if (parseName.empty()) return;
+
+    if (!parseName.starts_with(L"shell:") && !parseName.starts_with(L"\\\\") &&
+        (parseName.length() < 2 || parseName[1] != L':')) {
+        parseName = L"shell:AppsFolder\\" + parseName;
+    }
+
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    HRESULT hr = SHParseDisplayName(parseName.c_str(), nullptr, &pidl, 0, nullptr);
+    if (FAILED(hr) || !pidl) {
+        Wh_Log(L"[explorer] ShowMenu: SHParseDisplayName failed (%08X) for %ls", (unsigned)hr, parseName.c_str());
+        return;
+    }
+
+    IShellFolder* pFolder = nullptr;
+    PCUITEMID_CHILD childPidl = nullptr;
+    hr = SHBindToParent(pidl, IID_IShellFolder, (void**)&pFolder, &childPidl);
+    if (FAILED(hr) || !pFolder) {
+        ILFree(pidl);
+        return;
+    }
+
+    IContextMenu* pContextMenu = nullptr;
+    hr = pFolder->GetUIObjectOf(nullptr, 1, &childPidl, IID_IContextMenu, nullptr, (void**)&pContextMenu);
+    if (SUCCEEDED(hr) && pContextMenu) {
+        HMENU hMenu = CreatePopupMenu();
+        if (hMenu) {
+            hr = pContextMenu->QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
+            if (SUCCEEDED(hr)) {
+                pContextMenu->QueryInterface(IID_IContextMenu2, (void**)&g_pActiveMenu2);
+                pContextMenu->QueryInterface(IID_IContextMenu3, (void**)&g_pActiveMenu3);
+
+                SetWindowPos(hOwner, HWND_TOPMOST, x, y, 1, 1, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+                SetForegroundWindow(hOwner);
+
+                UINT cmd = TrackPopupMenuEx(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN, x, y, hOwner, nullptr);
+                if (cmd > 0) {
+                    CMINVOKECOMMANDINFOEX info = { sizeof(info) };
+                    info.fMask = CMIC_MASK_UNICODE;
+                    info.hwnd = hOwner;
+                    info.lpVerb = MAKEINTRESOURCEA(cmd - 1);
+                    info.lpVerbW = MAKEINTRESOURCEW(cmd - 1);
+                    info.nShow = SW_SHOWNORMAL;
+                    pContextMenu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+                    Wh_Log(L"[explorer] ShowMenu: executed command %u", cmd);
+                }
+
+                if (g_pActiveMenu3) { g_pActiveMenu3->Release(); g_pActiveMenu3 = nullptr; }
+                if (g_pActiveMenu2) { g_pActiveMenu2->Release(); g_pActiveMenu2 = nullptr; }
+                ShowWindow(hOwner, SW_HIDE);
+            }
+            DestroyMenu(hMenu);
+        }
+        pContextMenu->Release();
+    }
+    pFolder->Release();
+    ILFree(pidl);
+}
+
+static LRESULT CALLBACK ExplorerBrokerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (g_pActiveMenu3) {
+        LRESULT lRes = 0;
+        if (SUCCEEDED(g_pActiveMenu3->HandleMenuMsg2(uMsg, wParam, lParam, &lRes))) {
+            return lRes;
+        }
+    } else if (g_pActiveMenu2) {
+        if (SUCCEEDED(g_pActiveMenu2->HandleMenuMsg(uMsg, wParam, lParam))) {
+            return 0;
+        }
+    }
+
+    if (uMsg == WM_COPYDATA) {
+        auto pcds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+        if (!pcds || !pcds->lpData) return FALSE;
+
+        if (pcds->dwData == kBrokerActionPinTaskbar || pcds->dwData == kBrokerActionPinStart) {
+            auto path = reinterpret_cast<const wchar_t*>(pcds->lpData);
+            bool toTaskbar = (pcds->dwData == kBrokerActionPinTaskbar);
+            Wh_Log(L"[explorer] Pin request for %ls (toTaskbar=%d)", path, toTaskbar);
+            bool success = PinItemInExplorer(path, toTaskbar);
+            return success ? TRUE : FALSE;
+        }
+
+        if (pcds->dwData == kBrokerActionContextMenu) {
+            if (pcds->cbData >= sizeof(BrokerMenuRequest)) {
+                auto req = reinterpret_cast<const BrokerMenuRequest*>(pcds->lpData);
+                Wh_Log(L"[explorer] Context menu request for %ls at (%d, %d)", req->path, req->x, req->y);
+                ShowExplorerContextMenu(hWnd, req->path, req->x, req->y);
+                return TRUE;
+            }
+        }
+        return FALSE;
+    }
+    return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
+
+static void ExplorerBrokerThreadMain() {
+    HRESULT hrOle = OleInitialize(nullptr);
+    g_explorerBrokerThreadId = GetCurrentThreadId();
+
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = ExplorerBrokerWndProc;
+    wc.hInstance = GetCurrentModuleHandle();
+    wc.lpszClassName = L"WindhawkStartEverythingBroker";
+    RegisterClassExW(&wc);
+
+    g_hExplorerBrokerWnd = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        wc.lpszClassName,
+        wc.lpszClassName,
+        WS_POPUP,
+        -100, -100, 1, 1,
+        nullptr, nullptr, wc.hInstance, nullptr);
+
+    if (g_hExplorerBrokerWnd) {
+        Wh_Log(L"[explorer] Explorer broker window created: %p", g_hExplorerBrokerWnd);
+        HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (tray) {
+            SetPropW(tray, L"WindhawkStartEverythingBrokerHwnd", g_hExplorerBrokerWnd);
+        }
+    }
+
+    g_explorerBrokerRunning.store(true);
+
+    MSG msg;
+    while (GetMessageW(&msg, nullptr, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    if (g_hExplorerBrokerWnd) {
+        HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (tray) {
+            RemovePropW(tray, L"WindhawkStartEverythingBrokerHwnd");
+        }
+        DestroyWindow(g_hExplorerBrokerWnd);
+        g_hExplorerBrokerWnd = nullptr;
+    }
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+
+    if (SUCCEEDED(hrOle)) {
+        OleUninitialize();
+    }
+    g_explorerBrokerRunning.store(false);
+}
+
+static void StartExplorerBroker() {
+    if (g_explorerBrokerRunning.load()) return;
+    g_explorerBrokerThread = std::thread(ExplorerBrokerThreadMain);
+}
+
+static void StopExplorerBroker() {
+    if (g_explorerBrokerThreadId) {
+        PostThreadMessageW(g_explorerBrokerThreadId, WM_QUIT, 0, 0);
+    }
+    if (g_explorerBrokerThread.joinable()) {
+        g_explorerBrokerThread.join();
+    }
+}
+
 void InitExplorer() {
     Wh_Log(L"=== start-everything: initializing explorer.exe shell hooks ===");
     Wh_SetFunctionHook((void*)SetForegroundWindow, (void*)Hook_Explorer_SetForegroundWindow,
@@ -3402,6 +3672,7 @@ void InitExplorer() {
                                (void**)&pOriginalExplorerSwitchToThisWindow);
         }
     }
+    StartExplorerBroker();
 }
 
 // ===========================================================================
@@ -4913,6 +5184,61 @@ void OpenFileLocation(std::wstring path) {
     });
 }
 
+inline HWND GetExplorerBrokerWindow() {
+    HWND hBroker = FindWindowW(L"WindhawkStartEverythingBroker", nullptr);
+    if (!hBroker) {
+        HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (tray) {
+            hBroker = reinterpret_cast<HWND>(GetPropW(tray, L"WindhawkStartEverythingBrokerHwnd"));
+        }
+    }
+    return hBroker;
+}
+
+inline void RequestBrokerPin(const std::wstring& targetPath, bool toTaskbar) {
+    SpawnTrackedLaunch([targetPath, toTaskbar] {
+        HWND hBroker = GetExplorerBrokerWindow();
+        if (!hBroker) {
+            Wh_Log(L"RequestBrokerPin: broker window not found in explorer.exe");
+            return;
+        }
+        COPYDATASTRUCT cds = {};
+        cds.dwData = toTaskbar ? kBrokerActionPinTaskbar : kBrokerActionPinStart;
+        cds.cbData = static_cast<DWORD>((targetPath.length() + 1) * sizeof(wchar_t));
+        cds.lpData = const_cast<wchar_t*>(targetPath.c_str());
+        DWORD_PTR res = 0;
+        SendMessageTimeoutW(hBroker, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds),
+                            SMTO_ABORTIFHUNG | SMTO_NORMAL, 5000, &res);
+        Wh_Log(L"RequestBrokerPin: sent pin request for %ls (toTaskbar=%d, result=%p)", targetPath.c_str(), toTaskbar, (void*)res);
+    });
+}
+
+inline void RequestBrokerContextMenu(const std::wstring& targetPath) {
+    SpawnTrackedLaunch([targetPath] {
+        HWND hBroker = GetExplorerBrokerWindow();
+        if (!hBroker) {
+            Wh_Log(L"RequestBrokerContextMenu: broker window not found in explorer.exe");
+            return;
+        }
+        POINT pt = {};
+        GetCursorPos(&pt);
+
+        BrokerMenuRequest req = {};
+        req.x = pt.x;
+        req.y = pt.y;
+        wcsncpy_s(req.path, targetPath.c_str(), _TRUNCATE);
+
+        COPYDATASTRUCT cds = {};
+        cds.dwData = kBrokerActionContextMenu;
+        cds.cbData = sizeof(req);
+        cds.lpData = &req;
+        DWORD_PTR res = 0;
+        SendMessageTimeoutW(hBroker, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds),
+                            SMTO_ABORTIFHUNG | SMTO_NORMAL, 30000, &res);
+        Wh_Log(L"RequestBrokerContextMenu: completed for %ls", targetPath.c_str());
+    });
+}
+
 inline bool CopyTextToClipboard(const std::wstring& text) {
     if (text.empty()) return false;
     if (!OpenClipboard(nullptr)) return false;
@@ -5846,6 +6172,33 @@ void RenderResults() try {
                 flyout.Items().Append(adminItem);
             }
 
+            if (!isWebItem && !isSettingItem && !item.openPath.empty()) {
+                std::wstring pinTarget = item.openPath;
+
+                wuxc::MenuFlyoutSeparator pinSep;
+                flyout.Items().Append(pinSep);
+
+                wuxc::MenuFlyoutItem pinTaskbarItem;
+                pinTaskbarItem.Text(L"Pin to taskbar");
+                wuxc::FontIcon pinTaskbarIcon;
+                pinTaskbarIcon.Glyph(L"\uE718");
+                pinTaskbarItem.Icon(pinTaskbarIcon);
+                pinTaskbarItem.Click([pinTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                    RequestBrokerPin(pinTarget, true /* toTaskbar */);
+                });
+                flyout.Items().Append(pinTaskbarItem);
+
+                wuxc::MenuFlyoutItem pinStartItem;
+                pinStartItem.Text(L"Pin to Start");
+                wuxc::FontIcon pinStartIcon;
+                pinStartIcon.Glyph(L"\uE840");
+                pinStartItem.Icon(pinStartIcon);
+                pinStartItem.Click([pinTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                    RequestBrokerPin(pinTarget, false /* toStart */);
+                });
+                flyout.Items().Append(pinStartItem);
+            }
+
             if (isWebItem) {
                 std::wstring webUrl = item.openPath;
                 wuxc::MenuFlyoutItem copyUrlItem;
@@ -5912,6 +6265,20 @@ void RenderResults() try {
                     });
                     flyout.Items().Append(shortcutItem);
                 }
+
+                wuxc::MenuFlyoutSeparator moreSep;
+                flyout.Items().Append(moreSep);
+
+                wuxc::MenuFlyoutItem moreItem;
+                moreItem.Text(L"More options (Explorer menu)");
+                wuxc::FontIcon moreIcon;
+                moreIcon.Glyph(L"\uE712");
+                moreItem.Icon(moreIcon);
+                moreItem.Click([locTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                    DismissStartMenu();
+                    RequestBrokerContextMenu(locTarget);
+                });
+                flyout.Items().Append(moreItem);
             }
         }
 
@@ -6176,6 +6543,29 @@ void RenderResults() try {
                     OpenResult(target, true /* asAdmin */);
                 });
                 flyout.Items().Append(adminItem);
+
+                wuxc::MenuFlyoutSeparator pinSep;
+                flyout.Items().Append(pinSep);
+
+                wuxc::MenuFlyoutItem pinTaskbarItem;
+                pinTaskbarItem.Text(L"Pin to taskbar");
+                wuxc::FontIcon pinTaskbarIcon;
+                pinTaskbarIcon.Glyph(L"\uE718");
+                pinTaskbarItem.Icon(pinTaskbarIcon);
+                pinTaskbarItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                    RequestBrokerPin(target, true /* toTaskbar */);
+                });
+                flyout.Items().Append(pinTaskbarItem);
+
+                wuxc::MenuFlyoutItem pinStartItem;
+                pinStartItem.Text(L"Pin to Start");
+                wuxc::FontIcon pinStartIcon;
+                pinStartIcon.Glyph(L"\uE840");
+                pinStartItem.Icon(pinStartIcon);
+                pinStartItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                    RequestBrokerPin(target, false /* toStart */);
+                });
+                flyout.Items().Append(pinStartItem);
             }
 
             wuxc::MenuFlyoutSeparator sep1;
@@ -6235,6 +6625,20 @@ void RenderResults() try {
                 tools::CreateDesktopShortcut(target, title);
             });
             flyout.Items().Append(shortcutItem);
+
+            wuxc::MenuFlyoutSeparator moreSep;
+            flyout.Items().Append(moreSep);
+
+            wuxc::MenuFlyoutItem moreItem;
+            moreItem.Text(L"More options (Explorer menu)");
+            wuxc::FontIcon moreIcon;
+            moreIcon.Glyph(L"\uE712");
+            moreItem.Icon(moreIcon);
+            moreItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                DismissStartMenu();
+                RequestBrokerContextMenu(target);
+            });
+            flyout.Items().Append(moreItem);
 
             button.ContextFlyout(flyout);
         }
@@ -7395,6 +7799,9 @@ void Wh_ModUninit() {
     }
 
     if (g_targetProcess != TargetProcess::StartMenu) {
+        if (g_targetProcess == TargetProcess::Explorer) {
+            StopExplorerBroker();
+        }
         Wh_Log(L"uninit: explorer.exe unhook complete");
         return;
     }
