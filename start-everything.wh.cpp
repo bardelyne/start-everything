@@ -3255,6 +3255,7 @@ namespace wuxcp = winrt::Windows::UI::Xaml::Controls::Primitives;
 namespace wuxm = winrt::Windows::UI::Xaml::Media;
 namespace wuxmi = winrt::Windows::UI::Xaml::Media::Imaging;
 namespace wuxma = winrt::Windows::UI::Xaml::Media::Animation;
+namespace wuxi = winrt::Windows::UI::Xaml::Input;
 
 namespace {
 // Rec removed in favor of native Wh_Log
@@ -3496,9 +3497,9 @@ static bool PinItemInExplorer(const wchar_t* pathOrTarget, bool toTaskbar) {
     return success;
 }
 
-static void ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, int x, int y) {
+static int ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, int x, int y) {
     std::wstring parseName = pathOrTarget ? pathOrTarget : L"";
-    if (parseName.empty()) return;
+    if (parseName.empty()) return 0;
 
     if (!parseName.starts_with(L"shell:") && !parseName.starts_with(L"\\\\") &&
         (parseName.length() < 2 || parseName[1] != L':')) {
@@ -3509,7 +3510,7 @@ static void ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, in
     HRESULT hr = SHParseDisplayName(parseName.c_str(), nullptr, &pidl, 0, nullptr);
     if (FAILED(hr) || !pidl) {
         Wh_Log(L"[explorer] ShowMenu: SHParseDisplayName failed (%08X) for %ls", (unsigned)hr, parseName.c_str());
-        return;
+        return 0;
     }
 
     IShellFolder* pFolder = nullptr;
@@ -3517,11 +3518,12 @@ static void ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, in
     hr = SHBindToParent(pidl, IID_IShellFolder, (void**)&pFolder, &childPidl);
     if (FAILED(hr) || !pFolder) {
         ILFree(pidl);
-        return;
+        return 0;
     }
 
+    int result = 0;
     IContextMenu* pContextMenu = nullptr;
-    hr = pFolder->GetUIObjectOf(nullptr, 1, &childPidl, IID_IContextMenu, nullptr, (void**)&pContextMenu);
+    hr = pFolder->GetUIObjectOf(hOwner, 1, &childPidl, IID_IContextMenu, nullptr, (void**)&pContextMenu);
     if (SUCCEEDED(hr) && pContextMenu) {
         HMENU hMenu = CreatePopupMenu();
         if (hMenu) {
@@ -3530,24 +3532,49 @@ static void ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, in
                 pContextMenu->QueryInterface(IID_IContextMenu2, (void**)&g_pActiveMenu2);
                 pContextMenu->QueryInterface(IID_IContextMenu3, (void**)&g_pActiveMenu3);
 
-                SetWindowPos(hOwner, HWND_TOPMOST, x, y, 1, 1, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-                SetForegroundWindow(hOwner);
+                if (x < 0 || y < 0) {
+                    POINT pt = {};
+                    GetCursorPos(&pt);
+                    x = pt.x;
+                    y = pt.y;
+                }
 
+                DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+                DWORD curThread = GetCurrentThreadId();
+                if (fgThread && fgThread != curThread) {
+                    AttachThreadInput(curThread, fgThread, TRUE);
+                }
+
+                SetForegroundWindow(hOwner);
+                SetActiveWindow(hOwner);
+
+                result = 1; // Menu shown
                 UINT cmd = TrackPopupMenuEx(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN, x, y, hOwner, nullptr);
+
+                PostMessageW(hOwner, WM_NULL, 0, 0);
+
+                if (fgThread && fgThread != curThread) {
+                    AttachThreadInput(curThread, fgThread, FALSE);
+                }
+
                 if (cmd > 0) {
                     CMINVOKECOMMANDINFOEX info = { sizeof(info) };
-                    info.fMask = CMIC_MASK_UNICODE;
+                    info.fMask = CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE;
                     info.hwnd = hOwner;
                     info.lpVerb = MAKEINTRESOURCEA(cmd - 1);
                     info.lpVerbW = MAKEINTRESOURCEW(cmd - 1);
                     info.nShow = SW_SHOWNORMAL;
-                    pContextMenu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
-                    Wh_Log(L"[explorer] ShowMenu: executed command %u", cmd);
+                    info.ptInvoke.x = x;
+                    info.ptInvoke.y = y;
+                    hr = pContextMenu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+                    Wh_Log(L"[explorer] ShowMenu: executed command %u, hr=%08X", cmd, (unsigned)hr);
+                    result = 2; // Command executed!
+                } else {
+                    Wh_Log(L"[explorer] ShowMenu: dismissed by user without selection");
                 }
 
                 if (g_pActiveMenu3) { g_pActiveMenu3->Release(); g_pActiveMenu3 = nullptr; }
                 if (g_pActiveMenu2) { g_pActiveMenu2->Release(); g_pActiveMenu2 = nullptr; }
-                ShowWindow(hOwner, SW_HIDE);
             }
             DestroyMenu(hMenu);
         }
@@ -3555,17 +3582,21 @@ static void ShowExplorerContextMenu(HWND hOwner, const wchar_t* pathOrTarget, in
     }
     pFolder->Release();
     ILFree(pidl);
+    return result;
 }
 
 static LRESULT CALLBACK ExplorerBrokerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    if (g_pActiveMenu3) {
-        LRESULT lRes = 0;
-        if (SUCCEEDED(g_pActiveMenu3->HandleMenuMsg2(uMsg, wParam, lParam, &lRes))) {
-            return lRes;
-        }
-    } else if (g_pActiveMenu2) {
-        if (SUCCEEDED(g_pActiveMenu2->HandleMenuMsg(uMsg, wParam, lParam))) {
-            return 0;
+    if (uMsg == WM_INITMENUPOPUP || uMsg == WM_DRAWITEM || uMsg == WM_MEASUREITEM ||
+        uMsg == WM_MENUCHAR || uMsg == WM_MENUSELECT) {
+        if (g_pActiveMenu3) {
+            LRESULT lRes = 0;
+            if (g_pActiveMenu3->HandleMenuMsg2(uMsg, wParam, lParam, &lRes) == S_OK) {
+                return lRes;
+            }
+        } else if (g_pActiveMenu2) {
+            if (g_pActiveMenu2->HandleMenuMsg(uMsg, wParam, lParam) == S_OK) {
+                return (uMsg == WM_INITMENUPOPUP) ? 0 : TRUE;
+            }
         }
     }
 
@@ -3585,8 +3616,8 @@ static LRESULT CALLBACK ExplorerBrokerWndProc(HWND hWnd, UINT uMsg, WPARAM wPara
             if (pcds->cbData >= sizeof(BrokerMenuRequest)) {
                 auto req = reinterpret_cast<const BrokerMenuRequest*>(pcds->lpData);
                 Wh_Log(L"[explorer] Context menu request for %ls at (%d, %d)", req->path, req->x, req->y);
-                ShowExplorerContextMenu(hWnd, req->path, req->x, req->y);
-                return TRUE;
+                int res = ShowExplorerContextMenu(hWnd, req->path, req->x, req->y);
+                return res;
             }
         }
         return FALSE;
@@ -3604,16 +3635,41 @@ static void ExplorerBrokerThreadMain() {
     wc.lpszClassName = L"WindhawkStartEverythingBroker";
     RegisterClassExW(&wc);
 
-    g_hExplorerBrokerWnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-        wc.lpszClassName,
-        wc.lpszClassName,
-        WS_POPUP,
-        -100, -100, 1, 1,
-        nullptr, nullptr, wc.hInstance, nullptr);
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+    using CreateWindowInBand_t = HWND(WINAPI*)(
+        DWORD dwExStyle, LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD dwStyle,
+        int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu,
+        HINSTANCE hInstance, LPVOID lpParam, DWORD dwBand);
+    auto pfnCreateWindowInBand = hUser32 ? (CreateWindowInBand_t)GetProcAddress(hUser32, "CreateWindowInBand") : nullptr;
+    if (pfnCreateWindowInBand) {
+        g_hExplorerBrokerWnd = pfnCreateWindowInBand(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            wc.lpszClassName,
+            wc.lpszClassName,
+            WS_POPUP,
+            -100, -100, 1, 1,
+            nullptr, nullptr, wc.hInstance, nullptr,
+            12 /* ZBID_SYSTEM_TOOLS */);
+        Wh_Log(L"[explorer] CreateWindowInBand(12) returned %p", g_hExplorerBrokerWnd);
+    }
+    if (!g_hExplorerBrokerWnd) {
+        g_hExplorerBrokerWnd = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            wc.lpszClassName,
+            wc.lpszClassName,
+            WS_POPUP,
+            -100, -100, 1, 1,
+            nullptr, nullptr, wc.hInstance, nullptr);
+        Wh_Log(L"[explorer] CreateWindowExW returned %p", g_hExplorerBrokerWnd);
+    }
 
     if (g_hExplorerBrokerWnd) {
-        Wh_Log(L"[explorer] Explorer broker window created: %p", g_hExplorerBrokerWnd);
+        using SetWindowBand_t = BOOL(WINAPI*)(HWND, HWND, DWORD);
+        auto pfnSetWindowBand = hUser32 ? (SetWindowBand_t)GetProcAddress(hUser32, "SetWindowBand") : nullptr;
+        if (pfnSetWindowBand) {
+            BOOL ok = pfnSetWindowBand(g_hExplorerBrokerWnd, HWND_TOPMOST, 12 /* ZBID_SYSTEM_TOOLS */);
+            Wh_Log(L"[explorer] SetWindowBand(12) returned %d", ok);
+        }
         HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
         if (tray) {
             SetPropW(tray, L"WindhawkStartEverythingBrokerHwnd", g_hExplorerBrokerWnd);
@@ -4493,7 +4549,19 @@ bool IsOurWindowCloaked() {
     return false;
 }
 
+inline HWND GetExplorerBrokerWindow() {
+    HWND hBroker = FindWindowW(L"WindhawkStartEverythingBroker", nullptr);
+    if (!hBroker) {
+        HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (tray) {
+            hBroker = reinterpret_cast<HWND>(GetPropW(tray, L"WindhawkStartEverythingBrokerHwnd"));
+        }
+    }
+    return hBroker;
+}
+
 std::atomic<bool> g_suppressRefocus{false};
+std::atomic<bool> g_isShowingContextMenu{false};
 std::atomic<bool> g_appIndexNeedsRefresh{false};
 std::atomic<ULONGLONG> g_lastAppIndexRebuildTick{0};
 
@@ -4501,6 +4569,9 @@ void RequestAppIndexRefresh();
 
 void TakeForeground(bool force = false) {
     try {
+        if (g_isShowingContextMenu.load()) {
+            return;
+        }
         if (!force && g_suppressRefocus.load()) {
             return;
         }
@@ -4805,9 +4876,9 @@ static LRESULT CALLBACK StartMenuSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPara
             }
             TriggerMenuOpenFocus();
         } else {
-            // If the other window is in our own process (e.g. context menu, flyout, tooltip), don't suppress refocus!
-            if (otherPid == GetCurrentProcessId()) {
-                Wh_Log(L"subclass: WM_ACTIVATE (inactive, internal other=%p) -> ignoring", otherHwnd);
+            // If the other window is in our own process, or if context menu is showing, or if other window is the broker window, do NOT hide overlay!
+            if (otherPid == GetCurrentProcessId() || g_isShowingContextMenu.load() || otherHwnd == GetExplorerBrokerWindow()) {
+                Wh_Log(L"subclass: WM_ACTIVATE (inactive, context menu open or internal other=%p) -> keeping overlay", otherHwnd);
                 return DefSubclassProc(hWnd, uMsg, wParam, lParam);
             }
 
@@ -4837,6 +4908,10 @@ static LRESULT CALLBACK StartMenuSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPara
                     DWORD fgPid = 0;
                     if (fg) GetWindowThreadProcessId(fg, &fgPid);
                     if (fgPid != GetCurrentProcessId()) {
+                        if (g_isShowingContextMenu.load() || g_suppressRefocus.load() || fg == GetExplorerBrokerWindow()) {
+                            Wh_Log(L"subclass: WM_WINDOWPOSCHANGED suppressing foreground grab (context menu active, fg=%p)", fg);
+                            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                        }
                         Wh_Log(L"subclass: WM_WINDOWPOSCHANGED uncloaked, fg=%p (ours=%p) -> claiming foreground", fg, hWnd);
                         g_suppressRefocus.store(false);
                         TakeForeground(true);
@@ -4846,8 +4921,10 @@ static LRESULT CALLBACK StartMenuSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPara
             }
         }
     } else if (uMsg == WM_SETFOCUS) {
-        g_suppressRefocus.store(false);
-        TriggerMenuOpenFocus();
+        if (!g_isShowingContextMenu.load()) {
+            g_suppressRefocus.store(false);
+            TriggerMenuOpenFocus();
+        }
     } else if (uMsg == WM_CHAR) {
         if (ProcessKeyChar(static_cast<wchar_t>(wParam))) {
             return 0;
@@ -5184,17 +5261,6 @@ void OpenFileLocation(std::wstring path) {
     });
 }
 
-inline HWND GetExplorerBrokerWindow() {
-    HWND hBroker = FindWindowW(L"WindhawkStartEverythingBroker", nullptr);
-    if (!hBroker) {
-        HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
-        if (tray) {
-            hBroker = reinterpret_cast<HWND>(GetPropW(tray, L"WindhawkStartEverythingBrokerHwnd"));
-        }
-    }
-    return hBroker;
-}
-
 inline void RequestBrokerPin(const std::wstring& targetPath, bool toTaskbar) {
     SpawnTrackedLaunch([targetPath, toTaskbar] {
         HWND hBroker = GetExplorerBrokerWindow();
@@ -5214,15 +5280,35 @@ inline void RequestBrokerPin(const std::wstring& targetPath, bool toTaskbar) {
 }
 
 inline void RequestBrokerContextMenu(const std::wstring& targetPath) {
-    SpawnTrackedLaunch([targetPath] {
-        HWND hBroker = GetExplorerBrokerWindow();
-        if (!hBroker) {
-            Wh_Log(L"RequestBrokerContextMenu: broker window not found in explorer.exe");
-            return;
-        }
-        POINT pt = {};
-        GetCursorPos(&pt);
+    if (targetPath.empty()) return;
 
+    static std::atomic<ULONGLONG> s_lastMenuTime{0};
+    ULONGLONG now = GetTickCount64();
+    ULONGLONG prev = s_lastMenuTime.load();
+    if (now - prev < 500) {
+        return;
+    }
+    s_lastMenuTime.store(now);
+
+    HWND hBroker = GetExplorerBrokerWindow();
+    if (!hBroker) {
+        Wh_Log(L"RequestBrokerContextMenu: broker window not found in explorer.exe");
+        return;
+    }
+
+    g_isShowingContextMenu.store(true);
+    g_suppressRefocus.store(true);
+
+    DWORD brokerPid = 0;
+    GetWindowThreadProcessId(hBroker, &brokerPid);
+    if (brokerPid) {
+        AllowSetForegroundWindow(brokerPid);
+    }
+
+    POINT pt = {};
+    GetCursorPos(&pt);
+
+    SpawnTrackedLaunch([targetPath, pt, hBroker] {
         BrokerMenuRequest req = {};
         req.x = pt.x;
         req.y = pt.y;
@@ -5234,8 +5320,28 @@ inline void RequestBrokerContextMenu(const std::wstring& targetPath) {
         cds.lpData = &req;
         DWORD_PTR res = 0;
         SendMessageTimeoutW(hBroker, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds),
-                            SMTO_ABORTIFHUNG | SMTO_NORMAL, 30000, &res);
-        Wh_Log(L"RequestBrokerContextMenu: completed for %ls", targetPath.c_str());
+                            SMTO_NORMAL, 120000, &res);
+        Wh_Log(L"RequestBrokerContextMenu: broker returned res=%d for %ls", (int)res, targetPath.c_str());
+
+        if (res == 2) {
+            // Command was executed! Close Start Menu cleanly
+            if (g_ourBox) {
+                try {
+                    g_ourBox.Dispatcher().RunAsync(wuc::CoreDispatcherPriority::Normal, []() {
+                        DismissStartMenu();
+                    });
+                } catch (...) {
+                    keybd_event(VK_ESCAPE, 0, 0, 0);
+                    keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0);
+                }
+            } else {
+                keybd_event(VK_ESCAPE, 0, 0, 0);
+                keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0);
+            }
+        }
+
+        g_isShowingContextMenu.store(false);
+        g_suppressRefocus.store(false);
     });
 }
 
@@ -6111,178 +6217,24 @@ void RenderResults() try {
             }
         });
 
-        wuxc::MenuFlyout flyout;
-        if (!item.copyText.empty()) {
-            wuxc::MenuFlyoutItem copyItem;
-            copyItem.Text(L"Copy to clipboard");
-            wuxc::FontIcon copyIcon;
-            copyIcon.Glyph(L"\uE8C8");
-            copyItem.Icon(copyIcon);
-            copyItem.Click([txt = item.copyText](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                tools::CopyTextToClipboard(txt);
-            });
-            flyout.Items().Append(copyItem);
-        } else {
-            bool isWebItem = item.openPath.starts_with(L"http:") || item.openPath.starts_with(L"https:");
-            auto toLowerStr = [](std::wstring s) {
-                for (auto& c : s) c = static_cast<wchar_t>(towlower(c));
-                return s;
-            };
-            std::wstring lowerTitle = toLowerStr(item.title);
-            std::wstring lowerPath = toLowerStr(item.openPath);
-            std::wstring lowerSub = toLowerStr(item.subtitle);
-
-            bool isSettingItem = item.isSetting ||
-                                 lowerTitle == L"settings" ||
-                                 lowerTitle == L"windows settings" ||
-                                 lowerPath.starts_with(L"ms-settings:") ||
-                                 lowerPath.find(L"immersivecontrolpanel") != std::wstring::npos ||
-                                 lowerPath.find(L"systemsettings.exe") != std::wstring::npos ||
-                                 lowerSub.starts_with(L"settings");
-
-            wuxc::MenuFlyoutItem openItem;
-            openItem.Text(isWebItem ? L"Search in browser" : L"Open");
-            wuxc::FontIcon openIcon;
-            openIcon.Glyph(isWebItem ? L"\uE774" : L"\uE8A7");
-            openItem.Icon(openIcon);
-            openItem.Click([btn = button](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                for (size_t i = 0; i < g_activeApps.size(); ++i) {
-                    if (g_activeApps[i].button == btn) {
-                        LaunchSelectedApp(static_cast<int>(i), false);
-                        return;
-                    }
-                }
-            });
-            flyout.Items().Append(openItem);
-
-            if (item.canRunAsAdmin && !isWebItem && !isSettingItem) {
-                wuxc::MenuFlyoutItem adminItem;
-                adminItem.Text(L"Run as administrator");
-                wuxc::FontIcon adminIcon;
-                adminIcon.Glyph(L"\uE7EF");
-                adminItem.Icon(adminIcon);
-                adminItem.Click([btn = button](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    for (size_t i = 0; i < g_activeApps.size(); ++i) {
-                        if (g_activeApps[i].button == btn) {
-                            LaunchSelectedApp(static_cast<int>(i), true);
-                            return;
-                        }
-                    }
-                });
-                flyout.Items().Append(adminItem);
+        std::wstring locTarget = item.openPath;
+        std::wstring copyTxt = item.copyText;
+        button.ContextRequested([locTarget, copyTxt](wux::UIElement const&, wuxi::ContextRequestedEventArgs const& e) {
+            e.Handled(true);
+            if (!locTarget.empty()) {
+                RequestBrokerContextMenu(locTarget);
+            } else if (!copyTxt.empty()) {
+                tools::CopyTextToClipboard(copyTxt);
             }
-
-            if (!isWebItem && !isSettingItem && !item.openPath.empty()) {
-                std::wstring pinTarget = item.openPath;
-
-                wuxc::MenuFlyoutSeparator pinSep;
-                flyout.Items().Append(pinSep);
-
-                wuxc::MenuFlyoutItem pinTaskbarItem;
-                pinTaskbarItem.Text(L"Pin to taskbar");
-                wuxc::FontIcon pinTaskbarIcon;
-                pinTaskbarIcon.Glyph(L"\uE718");
-                pinTaskbarItem.Icon(pinTaskbarIcon);
-                pinTaskbarItem.Click([pinTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    RequestBrokerPin(pinTarget, true /* toTaskbar */);
-                });
-                flyout.Items().Append(pinTaskbarItem);
-
-                wuxc::MenuFlyoutItem pinStartItem;
-                pinStartItem.Text(L"Pin to Start");
-                wuxc::FontIcon pinStartIcon;
-                pinStartIcon.Glyph(L"\uE840");
-                pinStartItem.Icon(pinStartIcon);
-                pinStartItem.Click([pinTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    RequestBrokerPin(pinTarget, false /* toStart */);
-                });
-                flyout.Items().Append(pinStartItem);
+        });
+        button.RightTapped([locTarget, copyTxt](wf::IInspectable const&, wuxi::RightTappedRoutedEventArgs const& e) {
+            e.Handled(true);
+            if (!locTarget.empty()) {
+                RequestBrokerContextMenu(locTarget);
+            } else if (!copyTxt.empty()) {
+                tools::CopyTextToClipboard(copyTxt);
             }
-
-            if (isWebItem) {
-                std::wstring webUrl = item.openPath;
-                wuxc::MenuFlyoutItem copyUrlItem;
-                copyUrlItem.Text(L"Copy search link");
-                wuxc::FontIcon copyIcon;
-                copyIcon.Glyph(L"\uE8C8");
-                copyUrlItem.Icon(copyIcon);
-                copyUrlItem.Click([webUrl](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    CopyTextToClipboard(webUrl);
-                });
-                flyout.Items().Append(copyUrlItem);
-            } else if (!isSettingItem && !item.openPath.empty()) {
-                std::wstring locTarget = item.openPath;
-                std::wstring appTitle = item.title;
-                bool isFile = (GetFileAttributesW(locTarget.c_str()) != INVALID_FILE_ATTRIBUTES);
-
-                if (isFile) {
-                    wuxc::MenuFlyoutSeparator sep1;
-                    flyout.Items().Append(sep1);
-
-                    wuxc::MenuFlyoutItem locItem;
-                    locItem.Text(L"Open file location");
-                    wuxc::FontIcon locIcon;
-                    locIcon.Glyph(L"\uE838");
-                    locItem.Icon(locIcon);
-                    locItem.Click([locTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                        DismissStartMenu();
-                        OpenFileLocation(locTarget);
-                    });
-                    flyout.Items().Append(locItem);
-
-                    wuxc::MenuFlyoutItem copyPathItem;
-                    copyPathItem.Text(L"Copy path");
-                    wuxc::FontIcon copyPathIcon;
-                    copyPathIcon.Glyph(L"\uE71B");
-                    copyPathItem.Icon(copyPathIcon);
-                    copyPathItem.Click([locTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                        tools::CopyTextToClipboard(locTarget);
-                    });
-                    flyout.Items().Append(copyPathItem);
-
-                    wuxc::MenuFlyoutItem shortcutItem;
-                    shortcutItem.Text(L"Create desktop shortcut");
-                    wuxc::FontIcon shortcutIcon;
-                    shortcutIcon.Glyph(L"\uE7C5");
-                    shortcutItem.Icon(shortcutIcon);
-                    shortcutItem.Click([locTarget, appTitle](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                        DismissStartMenu();
-                        tools::CreateDesktopShortcut(locTarget, appTitle);
-                    });
-                    flyout.Items().Append(shortcutItem);
-                } else if (!locTarget.starts_with(L"ms-settings:") && !locTarget.starts_with(L"http:") && !locTarget.starts_with(L"https:")) {
-                    wuxc::MenuFlyoutSeparator sep1;
-                    flyout.Items().Append(sep1);
-
-                    wuxc::MenuFlyoutItem shortcutItem;
-                    shortcutItem.Text(L"Create desktop shortcut");
-                    wuxc::FontIcon shortcutIcon;
-                    shortcutIcon.Glyph(L"\uE7C5");
-                    shortcutItem.Icon(shortcutIcon);
-                    shortcutItem.Click([locTarget, appTitle](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                        DismissStartMenu();
-                        tools::CreateDesktopShortcut(L"shell:AppsFolder\\" + locTarget, appTitle);
-                    });
-                    flyout.Items().Append(shortcutItem);
-                }
-
-                wuxc::MenuFlyoutSeparator moreSep;
-                flyout.Items().Append(moreSep);
-
-                wuxc::MenuFlyoutItem moreItem;
-                moreItem.Text(L"More options (Explorer menu)");
-                wuxc::FontIcon moreIcon;
-                moreIcon.Glyph(L"\uE712");
-                moreItem.Icon(moreIcon);
-                moreItem.Click([locTarget](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    DismissStartMenu();
-                    RequestBrokerContextMenu(locTarget);
-                });
-                flyout.Items().Append(moreItem);
-            }
-        }
-
-        button.ContextFlyout(flyout);
+        });
 
         return AppCardUI{item.appIndex, item.title, item.openPath, button, item.canRunAsAdmin, item.isSetting};
     };
@@ -6515,132 +6467,18 @@ void RenderResults() try {
                 OpenResult(target);
             });
 
-            wuxc::MenuFlyout flyout;
-            wuxc::MenuFlyoutItem openItem;
-            openItem.Text(L"Open");
-            wuxc::FontIcon openIcon;
-            openIcon.Glyph(L"\uE8A7");
-            openItem.Icon(openIcon);
-            openItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                DismissStartMenu();
-                OpenResult(target);
+            button.ContextRequested([target](wux::UIElement const&, wuxi::ContextRequestedEventArgs const& e) {
+                e.Handled(true);
+                if (!target.empty()) {
+                    RequestBrokerContextMenu(target);
+                }
             });
-            flyout.Items().Append(openItem);
-
-            std::wstring lower = target;
-            std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-            bool canElevate = lower.ends_with(L".exe") || lower.ends_with(L".bat") ||
-                              lower.ends_with(L".cmd") || lower.ends_with(L".ps1") ||
-                              lower.ends_with(L".msc") || lower.ends_with(L".lnk");
-            if (canElevate) {
-                wuxc::MenuFlyoutItem adminItem;
-                adminItem.Text(L"Run as administrator");
-                wuxc::FontIcon adminIcon;
-                adminIcon.Glyph(L"\uE7EF");
-                adminItem.Icon(adminIcon);
-                adminItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    DismissStartMenu();
-                    OpenResult(target, true /* asAdmin */);
-                });
-                flyout.Items().Append(adminItem);
-
-                wuxc::MenuFlyoutSeparator pinSep;
-                flyout.Items().Append(pinSep);
-
-                wuxc::MenuFlyoutItem pinTaskbarItem;
-                pinTaskbarItem.Text(L"Pin to taskbar");
-                wuxc::FontIcon pinTaskbarIcon;
-                pinTaskbarIcon.Glyph(L"\uE718");
-                pinTaskbarItem.Icon(pinTaskbarIcon);
-                pinTaskbarItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    RequestBrokerPin(target, true /* toTaskbar */);
-                });
-                flyout.Items().Append(pinTaskbarItem);
-
-                wuxc::MenuFlyoutItem pinStartItem;
-                pinStartItem.Text(L"Pin to Start");
-                wuxc::FontIcon pinStartIcon;
-                pinStartIcon.Glyph(L"\uE840");
-                pinStartItem.Icon(pinStartIcon);
-                pinStartItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                    RequestBrokerPin(target, false /* toStart */);
-                });
-                flyout.Items().Append(pinStartItem);
-            }
-
-            wuxc::MenuFlyoutSeparator sep1;
-            flyout.Items().Append(sep1);
-
-            wuxc::MenuFlyoutItem cutItem;
-            cutItem.Text(L"Cut");
-            wuxc::FontIcon cutIcon;
-            cutIcon.Glyph(L"\uE8C6");
-            cutItem.Icon(cutIcon);
-            cutItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                tools::CopyOrCutFileToClipboard(target, true /* isCut */);
+            button.RightTapped([target](wf::IInspectable const&, wuxi::RightTappedRoutedEventArgs const& e) {
+                e.Handled(true);
+                if (!target.empty()) {
+                    RequestBrokerContextMenu(target);
+                }
             });
-            flyout.Items().Append(cutItem);
-
-            wuxc::MenuFlyoutItem copyItem;
-            copyItem.Text(L"Copy");
-            wuxc::FontIcon copyIcon;
-            copyIcon.Glyph(L"\uE8C8");
-            copyItem.Icon(copyIcon);
-            copyItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                tools::CopyOrCutFileToClipboard(target, false /* isCut */);
-            });
-            flyout.Items().Append(copyItem);
-
-            wuxc::MenuFlyoutItem copyPathItem;
-            copyPathItem.Text(L"Copy path");
-            wuxc::FontIcon copyPathIcon;
-            copyPathIcon.Glyph(L"\uE71B");
-            copyPathItem.Icon(copyPathIcon);
-            copyPathItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                tools::CopyTextToClipboard(target);
-            });
-            flyout.Items().Append(copyPathItem);
-
-            wuxc::MenuFlyoutSeparator sep2;
-            flyout.Items().Append(sep2);
-
-            wuxc::MenuFlyoutItem locItem;
-            locItem.Text(L"Open file location");
-            wuxc::FontIcon locIcon;
-            locIcon.Glyph(L"\uE838");
-            locItem.Icon(locIcon);
-            locItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                DismissStartMenu();
-                OpenFileLocation(target);
-            });
-            flyout.Items().Append(locItem);
-
-            wuxc::MenuFlyoutItem shortcutItem;
-            shortcutItem.Text(L"Create desktop shortcut");
-            wuxc::FontIcon shortcutIcon;
-            shortcutIcon.Glyph(L"\uE7C5");
-            shortcutItem.Icon(shortcutIcon);
-            shortcutItem.Click([target, title = item.title](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                DismissStartMenu();
-                tools::CreateDesktopShortcut(target, title);
-            });
-            flyout.Items().Append(shortcutItem);
-
-            wuxc::MenuFlyoutSeparator moreSep;
-            flyout.Items().Append(moreSep);
-
-            wuxc::MenuFlyoutItem moreItem;
-            moreItem.Text(L"More options (Explorer menu)");
-            wuxc::FontIcon moreIcon;
-            moreIcon.Glyph(L"\uE712");
-            moreItem.Icon(moreIcon);
-            moreItem.Click([target](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                DismissStartMenu();
-                RequestBrokerContextMenu(target);
-            });
-            flyout.Items().Append(moreItem);
-
-            button.ContextFlyout(flyout);
         }
         return button;
     };
