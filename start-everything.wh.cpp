@@ -4856,6 +4856,20 @@ void InstallMessageHook() {
 
 static bool g_subclassed = false;
 static LRESULT CALLBACK StartMenuSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, DWORD_PTR dwRefData) {
+    if (uMsg == WM_INITMENUPOPUP || uMsg == WM_DRAWITEM || uMsg == WM_MEASUREITEM ||
+        uMsg == WM_MENUCHAR || uMsg == WM_MENUSELECT) {
+        if (g_pActiveMenu3) {
+            LRESULT lRes = 0;
+            if (g_pActiveMenu3->HandleMenuMsg2(uMsg, wParam, lParam, &lRes) == S_OK) {
+                return lRes;
+            }
+        } else if (g_pActiveMenu2) {
+            if (g_pActiveMenu2->HandleMenuMsg(uMsg, wParam, lParam) == S_OK) {
+                return (uMsg == WM_INITMENUPOPUP) ? 0 : TRUE;
+            }
+        }
+    }
+
     if (uMsg == WM_ACTIVATE) {
         HWND otherHwnd = reinterpret_cast<HWND>(lParam);
         DWORD otherPid = 0;
@@ -5277,6 +5291,121 @@ inline void RequestBrokerPin(const std::wstring& targetPath, bool toTaskbar) {
                             SMTO_ABORTIFHUNG | SMTO_NORMAL, 5000, &res);
         Wh_Log(L"RequestBrokerPin: sent pin request for %ls (toTaskbar=%d, result=%p)", targetPath.c_str(), toTaskbar, (void*)res);
     });
+}
+
+static bool ShowLocalContextMenu(const std::wstring& pathOrTarget, int x = -1, int y = -1) {
+    if (pathOrTarget.empty()) return false;
+
+    HWND hOwner = GetOurCoreWindow();
+    if (!hOwner || !IsWindow(hOwner)) {
+        Wh_Log(L"[local-menu] CoreWindow not found");
+        return false;
+    }
+
+    std::wstring parseName = pathOrTarget;
+    if (!parseName.starts_with(L"shell:") && !parseName.starts_with(L"\\\\") &&
+        (parseName.length() < 2 || parseName[1] != L':')) {
+        parseName = L"shell:AppsFolder\\" + parseName;
+    }
+
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    HRESULT hr = SHParseDisplayName(parseName.c_str(), nullptr, &pidl, 0, nullptr);
+    if (FAILED(hr) || !pidl) {
+        Wh_Log(L"[local-menu] SHParseDisplayName failed (%08X) for %ls", (unsigned)hr, parseName.c_str());
+        return false;
+    }
+
+    IShellFolder* pFolder = nullptr;
+    PCUITEMID_CHILD childPidl = nullptr;
+    hr = SHBindToParent(pidl, IID_IShellFolder, (void**)&pFolder, &childPidl);
+    if (FAILED(hr) || !pFolder) {
+        Wh_Log(L"[local-menu] SHBindToParent failed (%08X)", (unsigned)hr);
+        ILFree(pidl);
+        return false;
+    }
+
+    IContextMenu* pContextMenu = nullptr;
+    hr = pFolder->GetUIObjectOf(hOwner, 1, &childPidl, IID_IContextMenu, nullptr, (void**)&pContextMenu);
+    Wh_Log(L"[local-menu] GetUIObjectOf returned %08X for %ls", (unsigned)hr, parseName.c_str());
+
+    bool handled = false;
+    if (SUCCEEDED(hr) && pContextMenu) {
+        HMENU hMenu = CreatePopupMenu();
+        if (hMenu) {
+            hr = pContextMenu->QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
+            int count = GetMenuItemCount(hMenu);
+            Wh_Log(L"[local-menu] QueryContextMenu returned %08X, items=%d", (unsigned)hr, count);
+
+            if (SUCCEEDED(hr) && count > 0) {
+                pContextMenu->QueryInterface(IID_IContextMenu2, (void**)&g_pActiveMenu2);
+                pContextMenu->QueryInterface(IID_IContextMenu3, (void**)&g_pActiveMenu3);
+
+                if (x < 0 || y < 0) {
+                    POINT pt = {};
+                    GetCursorPos(&pt);
+                    x = pt.x;
+                    y = pt.y;
+                }
+
+                g_isShowingContextMenu.store(true);
+                g_suppressRefocus.store(true);
+
+                UINT cmd = TrackPopupMenuEx(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN, x, y, hOwner, nullptr);
+                Wh_Log(L"[local-menu] TrackPopupMenuEx returned cmd=%u", cmd);
+
+                handled = true;
+
+                if (cmd > 0) {
+                    CMINVOKECOMMANDINFOEX info = { sizeof(info) };
+                    info.fMask = CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE;
+                    info.hwnd = hOwner;
+                    info.lpVerb = MAKEINTRESOURCEA(cmd - 1);
+                    info.lpVerbW = MAKEINTRESOURCEW(cmd - 1);
+                    info.nShow = SW_SHOWNORMAL;
+                    info.ptInvoke.x = x;
+                    info.ptInvoke.y = y;
+                    HRESULT hrInv = pContextMenu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+                    Wh_Log(L"[local-menu] InvokeCommand returned %08X", (unsigned)hrInv);
+
+                    DismissStartMenu();
+                }
+
+                g_isShowingContextMenu.store(false);
+                g_suppressRefocus.store(false);
+
+                if (g_pActiveMenu3) { g_pActiveMenu3->Release(); g_pActiveMenu3 = nullptr; }
+                if (g_pActiveMenu2) { g_pActiveMenu2->Release(); g_pActiveMenu2 = nullptr; }
+            }
+            DestroyMenu(hMenu);
+        }
+        pContextMenu->Release();
+    }
+    pFolder->Release();
+    ILFree(pidl);
+    return handled;
+}
+
+inline void RequestBrokerContextMenu(const std::wstring& targetPath);
+
+inline void RequestContextMenu(const std::wstring& targetPath) {
+    if (targetPath.empty()) return;
+
+    static std::atomic<ULONGLONG> s_lastMenuTime{0};
+    ULONGLONG now = GetTickCount64();
+    ULONGLONG prev = s_lastMenuTime.load();
+    if (now - prev < 500) {
+        return;
+    }
+    s_lastMenuTime.store(now);
+
+    // Try showing local context menu directly on CoreWindow first!
+    if (ShowLocalContextMenu(targetPath)) {
+        Wh_Log(L"RequestContextMenu: local context menu displayed successfully");
+        return;
+    }
+
+    Wh_Log(L"RequestContextMenu: local menu failed, falling back to broker");
+    RequestBrokerContextMenu(targetPath);
 }
 
 inline void RequestBrokerContextMenu(const std::wstring& targetPath) {
@@ -6222,7 +6351,7 @@ void RenderResults() try {
         button.ContextRequested([locTarget, copyTxt](wux::UIElement const&, wuxi::ContextRequestedEventArgs const& e) {
             e.Handled(true);
             if (!locTarget.empty()) {
-                RequestBrokerContextMenu(locTarget);
+                RequestContextMenu(locTarget);
             } else if (!copyTxt.empty()) {
                 tools::CopyTextToClipboard(copyTxt);
             }
@@ -6230,7 +6359,7 @@ void RenderResults() try {
         button.RightTapped([locTarget, copyTxt](wf::IInspectable const&, wuxi::RightTappedRoutedEventArgs const& e) {
             e.Handled(true);
             if (!locTarget.empty()) {
-                RequestBrokerContextMenu(locTarget);
+                RequestContextMenu(locTarget);
             } else if (!copyTxt.empty()) {
                 tools::CopyTextToClipboard(copyTxt);
             }
@@ -6470,13 +6599,13 @@ void RenderResults() try {
             button.ContextRequested([target](wux::UIElement const&, wuxi::ContextRequestedEventArgs const& e) {
                 e.Handled(true);
                 if (!target.empty()) {
-                    RequestBrokerContextMenu(target);
+                    RequestContextMenu(target);
                 }
             });
             button.RightTapped([target](wf::IInspectable const&, wuxi::RightTappedRoutedEventArgs const& e) {
                 e.Handled(true);
                 if (!target.empty()) {
-                    RequestBrokerContextMenu(target);
+                    RequestContextMenu(target);
                 }
             });
         }
