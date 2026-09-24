@@ -3391,6 +3391,178 @@ static void WINAPI Hook_Explorer_SwitchToThisWindow(HWND hWnd, BOOL fAltTab) {
     }
 }
 
+// ===========================================================================
+// Domain: Explorer Shell Property Relay
+// ===========================================================================
+
+static const wchar_t kExplorerHelperClassName[] = L"StartEverything_ExplorerHostClass";
+static const wchar_t kExplorerHelperWindowName[] = L"StartEverything_ExplorerHost";
+static const ULONG_PTR kExplorerCopyDataMagic = 0x53455052; // 'SEPR'
+
+static HANDLE g_hExplorerHelperThread = nullptr;
+static HWND g_hExplorerHelperWnd = nullptr;
+
+static LRESULT CALLBACK ExplorerHelperWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_COPYDATA: {
+        auto pcds = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
+        if (pcds && pcds->dwData == kExplorerCopyDataMagic && pcds->lpData && pcds->cbData >= sizeof(wchar_t)) {
+            size_t charCount = pcds->cbData / sizeof(wchar_t);
+            const wchar_t* pStr = reinterpret_cast<const wchar_t*>(pcds->lpData);
+            std::wstring targetPath(pStr, charCount);
+            while (!targetPath.empty() && targetPath.back() == L'\0') {
+                targetPath.pop_back();
+            }
+            while (!targetPath.empty() && (targetPath.front() == L' ' || targetPath.front() == L'\t' || targetPath.front() == L'"')) {
+                targetPath.erase(targetPath.begin());
+            }
+            while (!targetPath.empty() && (targetPath.back() == L' ' || targetPath.back() == L'\t' || targetPath.back() == L'"')) {
+                targetPath.pop_back();
+            }
+
+            Wh_Log(L"[Explorer] Received SEPR WM_COPYDATA for: %ls", targetPath.c_str());
+
+            std::thread([path = std::move(targetPath)]() {
+                HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+                AllowSetForegroundWindow(ASFW_ANY);
+
+                // Attempt 1: SHObjectProperties (Dedicated Win32 Shell Properties API)
+                BOOL ok = SHObjectProperties(nullptr, 0x00000002 /* SHOP_FILEPATH */, path.c_str(), nullptr);
+                Wh_Log(L"[Explorer] SHObjectProperties returned %d, err=%lu for %ls", ok, GetLastError(), path.c_str());
+
+                // Attempt 2: ShellExecuteExW with PIDL
+                if (!ok) {
+                    PIDLIST_ABSOLUTE pidl = nullptr;
+                    SFGAOF sfgao = 0;
+                    if (SUCCEEDED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0, &sfgao)) && pidl) {
+                        SHELLEXECUTEINFOW sei{};
+                        sei.cbSize = sizeof(sei);
+                        sei.fMask = SEE_MASK_INVOKEIDLIST;
+                        sei.hwnd = nullptr;
+                        sei.lpIDList = pidl;
+                        sei.lpVerb = L"properties";
+                        sei.nShow = SW_SHOWNORMAL;
+                        ok = ShellExecuteExW(&sei);
+                        Wh_Log(L"[Explorer] ShellExecuteExW PIDL returned %d, err=%lu", ok, GetLastError());
+                        CoTaskMemFree(pidl);
+                    }
+                }
+
+                // Attempt 3: ShellExecuteExW with file path
+                if (!ok) {
+                    SHELLEXECUTEINFOW sei{};
+                    sei.cbSize = sizeof(sei);
+                    sei.fMask = SEE_MASK_INVOKEIDLIST;
+                    sei.hwnd = nullptr;
+                    sei.lpFile = path.c_str();
+                    sei.lpVerb = L"properties";
+                    sei.nShow = SW_SHOWNORMAL;
+                    ok = ShellExecuteExW(&sei);
+                    Wh_Log(L"[Explorer] ShellExecuteExW string returned %d, err=%lu", ok, GetLastError());
+                }
+
+                // Keep STA thread pumping messages briefly so shell extensions and COM handoff initialize
+                MSG msg;
+                DWORD start = GetTickCount();
+                while (GetTickCount() - start < 2000) {
+                    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    Sleep(50);
+                }
+
+                if (SUCCEEDED(hr)) {
+                    CoUninitialize();
+                }
+            }).detach();
+
+            return 1;
+        }
+        break;
+    }
+    case WM_CLOSE:
+        DestroyWindow(hWnd);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    default:
+        break;
+    }
+    return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
+
+static DWORD WINAPI ExplorerHelperThreadProc(LPVOID) {
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = ExplorerHelperWndProc;
+    wc.hInstance = GetCurrentModuleHandle();
+    wc.lpszClassName = kExplorerHelperClassName;
+    RegisterClassExW(&wc);
+
+    HWND hWnd = CreateWindowExW(
+        WS_EX_TOOLWINDOW,
+        kExplorerHelperClassName,
+        kExplorerHelperWindowName,
+        WS_POPUP,
+        0, 0, 0, 0,
+        nullptr, nullptr, wc.hInstance, nullptr
+    );
+
+    if (hWnd) {
+        ChangeWindowMessageFilterEx(hWnd, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
+        g_hExplorerHelperWnd = hWnd;
+        Wh_Log(L"[Explorer] Helper host window created: %p", hWnd);
+    } else {
+        Wh_Log(L"[Explorer] Failed to create helper host window, err=%lu", GetLastError());
+    }
+
+    MSG msg;
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    if (hWnd && IsWindow(hWnd)) {
+        DestroyWindow(hWnd);
+    }
+    g_hExplorerHelperWnd = nullptr;
+    UnregisterClassW(kExplorerHelperClassName, wc.hInstance);
+
+    if (SUCCEEDED(hr)) {
+        CoUninitialize();
+    }
+    return 0;
+}
+
+static void StartExplorerHelperHost() {
+    if (g_hExplorerHelperThread) return;
+
+    if (FindWindowW(kExplorerHelperClassName, kExplorerHelperWindowName)) {
+        Wh_Log(L"[Explorer] Helper host window already active in another explorer instance");
+        return;
+    }
+
+    g_hExplorerHelperThread = CreateThread(nullptr, 0, ExplorerHelperThreadProc, nullptr, 0, nullptr);
+    if (!g_hExplorerHelperThread) {
+        Wh_Log(L"[Explorer] Failed to create helper host thread, err=%lu", GetLastError());
+    }
+}
+
+static void StopExplorerHelperHost() {
+    if (g_hExplorerHelperWnd && IsWindow(g_hExplorerHelperWnd)) {
+        PostMessageW(g_hExplorerHelperWnd, WM_CLOSE, 0, 0);
+    }
+    if (g_hExplorerHelperThread) {
+        WaitForSingleObject(g_hExplorerHelperThread, 2000);
+        CloseHandle(g_hExplorerHelperThread);
+        g_hExplorerHelperThread = nullptr;
+    }
+}
+
 void InitExplorer() {
     Wh_Log(L"=== start-everything: initializing explorer.exe shell hooks ===");
     Wh_SetFunctionHook((void*)SetForegroundWindow, (void*)Hook_Explorer_SetForegroundWindow,
@@ -3405,6 +3577,8 @@ void InitExplorer() {
                                (void**)&pOriginalExplorerSwitchToThisWindow);
         }
     }
+
+    StartExplorerHelperHost();
 }
 
 // ===========================================================================
@@ -4922,19 +5096,52 @@ void ShowPropertiesDialog(std::wstring path) {
         Sleep(150);
 
         std::wstring cleanPath = path;
-        if (cleanPath.size() >= 2 && cleanPath.front() == L'"' && cleanPath.back() == L'"') {
-            cleanPath = cleanPath.substr(1, cleanPath.size() - 2);
+        while (!cleanPath.empty() && (cleanPath.front() == L' ' || cleanPath.front() == L'\t' || cleanPath.front() == L'"')) {
+            cleanPath.erase(cleanPath.begin());
+        }
+        while (!cleanPath.empty() && (cleanPath.back() == L' ' || cleanPath.back() == L'\t' || cleanPath.back() == L'"')) {
+            cleanPath.pop_back();
         }
 
+        if (cleanPath.empty()) return;
+
+        // 1. Relay to Explorer host window (runs at Medium integrity desktop shell)
+        HWND hHost = nullptr;
+        for (int retry = 0; retry < 3 && !hHost; ++retry) {
+            hHost = FindWindowW(kExplorerHelperClassName, kExplorerHelperWindowName);
+            if (!hHost) hHost = FindWindowW(nullptr, kExplorerHelperWindowName);
+            if (!hHost) Sleep(50);
+        }
+
+        if (hHost && IsWindow(hHost)) {
+            COPYDATASTRUCT cds{};
+            cds.dwData = kExplorerCopyDataMagic;
+            cds.cbData = static_cast<DWORD>((cleanPath.size() + 1) * sizeof(wchar_t));
+            cds.lpData = const_cast<wchar_t*>(cleanPath.c_str());
+
+            DWORD_PTR dwResult = 0;
+            LRESULT lres = SendMessageTimeoutW(
+                hHost,
+                WM_COPYDATA,
+                0,
+                reinterpret_cast<LPARAM>(&cds),
+                SMTO_ABORTIFHUNG | SMTO_NORMAL,
+                3000,
+                &dwResult
+            );
+            Wh_Log(L"ShowPropertiesDialog: SendMessageTimeoutW to explorer host returned %ld, res=%llu for %ls",
+                   lres, (unsigned long long)dwResult, cleanPath.c_str());
+            if (lres && dwResult == 1) {
+                return; // Successfully handed off to Explorer
+            }
+        }
+
+        Wh_Log(L"ShowPropertiesDialog: explorer host not reachable, trying direct fallback for %ls", cleanPath.c_str());
+
+        // 2. Direct in-process fallback
         HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-        HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
-
-        // 1. Direct call to SHObjectProperties (the dedicated shell properties API)
-        BOOL ok = SHObjectProperties(hTray, 0x00000002 /* SHOP_FILEPATH */, cleanPath.c_str(), nullptr);
-        Wh_Log(L"ShowPropertiesDialog: SHObjectProperties returned %d, err=%lu for %ls", ok, GetLastError(), cleanPath.c_str());
-
-        // 2. If SHObjectProperties fails, try ShellExecuteEx with PIDL
+        BOOL ok = SHObjectProperties(nullptr, 0x00000002 /* SHOP_FILEPATH */, cleanPath.c_str(), nullptr);
         if (!ok) {
             PIDLIST_ABSOLUTE pidl = nullptr;
             SFGAOF sfgao = 0;
@@ -4942,39 +5149,15 @@ void ShowPropertiesDialog(std::wstring path) {
                 SHELLEXECUTEINFOW sei{};
                 sei.cbSize = sizeof(sei);
                 sei.fMask = SEE_MASK_INVOKEIDLIST;
-                sei.hwnd = hTray;
+                sei.hwnd = nullptr;
                 sei.lpIDList = pidl;
                 sei.lpVerb = L"properties";
                 sei.nShow = SW_SHOWNORMAL;
                 ok = ShellExecuteExW(&sei);
-                Wh_Log(L"ShowPropertiesDialog: PIDL ShellExecuteExW returned %d, err=%lu", ok, GetLastError());
                 CoTaskMemFree(pidl);
             }
         }
 
-        // 3. If in-process calls failed (e.g. AppContainer security boundary),
-        // invoke out-of-process via PowerShell so it runs at desktop integrity
-        if (!ok) {
-            Wh_Log(L"ShowPropertiesDialog: falling back to out-of-process launch for %ls", cleanPath.c_str());
-            std::wstring psTarget = cleanPath;
-            size_t pos = 0;
-            while ((pos = psTarget.find(L'\'', pos)) != std::wstring::npos) {
-                psTarget.insert(pos, L"'");
-                pos += 2;
-            }
-            std::wstring cmd = L"-WindowStyle Hidden -Command \"& { Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class SP { [DllImport(\\\"shell32.dll\\\", CharSet=CharSet.Unicode)] public static extern bool SHObjectProperties(IntPtr h, uint t, string p, string q); }'; [SP]::SHObjectProperties([IntPtr]::Zero, 2, '" + psTarget + L"', $null) }\"";
-
-            SHELLEXECUTEINFOW sei{};
-            sei.cbSize = sizeof(sei);
-            sei.fMask = SEE_MASK_NOASYNC;
-            sei.lpVerb = L"open";
-            sei.lpFile = L"powershell.exe";
-            sei.lpParameters = cmd.c_str();
-            sei.nShow = SW_HIDE;
-            ShellExecuteExW(&sei);
-        }
-
-        // Give shell handoff time to complete before uninitializing COM
         Sleep(1000);
 
         if (SUCCEEDED(comHr)) {
@@ -7592,6 +7775,9 @@ void Wh_ModUninit() {
     }
 
     if (g_targetProcess != TargetProcess::StartMenu) {
+        if (g_targetProcess == TargetProcess::Explorer) {
+            StopExplorerHelperHost();
+        }
         Wh_Log(L"uninit: explorer.exe unhook complete");
         return;
     }
