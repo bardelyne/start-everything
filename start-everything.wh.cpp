@@ -4918,16 +4918,65 @@ void OpenFileLocation(std::wstring path) {
 
 void ShowPropertiesDialog(std::wstring path) {
     SpawnTrackedLaunch([path = std::move(path)] {
-        HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        SHELLEXECUTEINFOW sei{};
-        sei.cbSize = sizeof(sei);
-        sei.fMask = SEE_MASK_INVOKEIDLIST;
-        sei.lpVerb = L"properties";
-        sei.lpFile = path.c_str();
-        sei.nShow = SW_SHOWNORMAL;
-        if (!ShellExecuteExW(&sei)) {
-            SHObjectProperties(nullptr, 0x00000002 /* SHOP_FILEPATH */, path.c_str(), nullptr);
+        // Sleep briefly to let DismissStartMenu()'s VK_ESCAPE pass through
+        Sleep(150);
+
+        std::wstring cleanPath = path;
+        if (cleanPath.size() >= 2 && cleanPath.front() == L'"' && cleanPath.back() == L'"') {
+            cleanPath = cleanPath.substr(1, cleanPath.size() - 2);
         }
+
+        HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+        HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
+
+        // 1. Direct call to SHObjectProperties (the dedicated shell properties API)
+        BOOL ok = SHObjectProperties(hTray, 0x00000002 /* SHOP_FILEPATH */, cleanPath.c_str(), nullptr);
+        Wh_Log(L"ShowPropertiesDialog: SHObjectProperties returned %d, err=%lu for %ls", ok, GetLastError(), cleanPath.c_str());
+
+        // 2. If SHObjectProperties fails, try ShellExecuteEx with PIDL
+        if (!ok) {
+            PIDLIST_ABSOLUTE pidl = nullptr;
+            SFGAOF sfgao = 0;
+            if (SUCCEEDED(SHParseDisplayName(cleanPath.c_str(), nullptr, &pidl, 0, &sfgao)) && pidl) {
+                SHELLEXECUTEINFOW sei{};
+                sei.cbSize = sizeof(sei);
+                sei.fMask = SEE_MASK_INVOKEIDLIST;
+                sei.hwnd = hTray;
+                sei.lpIDList = pidl;
+                sei.lpVerb = L"properties";
+                sei.nShow = SW_SHOWNORMAL;
+                ok = ShellExecuteExW(&sei);
+                Wh_Log(L"ShowPropertiesDialog: PIDL ShellExecuteExW returned %d, err=%lu", ok, GetLastError());
+                CoTaskMemFree(pidl);
+            }
+        }
+
+        // 3. If in-process calls failed (e.g. AppContainer security boundary),
+        // invoke out-of-process via PowerShell so it runs at desktop integrity
+        if (!ok) {
+            Wh_Log(L"ShowPropertiesDialog: falling back to out-of-process launch for %ls", cleanPath.c_str());
+            std::wstring psTarget = cleanPath;
+            size_t pos = 0;
+            while ((pos = psTarget.find(L'\'', pos)) != std::wstring::npos) {
+                psTarget.insert(pos, L"'");
+                pos += 2;
+            }
+            std::wstring cmd = L"-WindowStyle Hidden -Command \"& { Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class SP { [DllImport(\\\"shell32.dll\\\", CharSet=CharSet.Unicode)] public static extern bool SHObjectProperties(IntPtr h, uint t, string p, string q); }'; [SP]::SHObjectProperties([IntPtr]::Zero, 2, '" + psTarget + L"', $null) }\"";
+
+            SHELLEXECUTEINFOW sei{};
+            sei.cbSize = sizeof(sei);
+            sei.fMask = SEE_MASK_NOASYNC;
+            sei.lpVerb = L"open";
+            sei.lpFile = L"powershell.exe";
+            sei.lpParameters = cmd.c_str();
+            sei.nShow = SW_HIDE;
+            ShellExecuteExW(&sei);
+        }
+
+        // Give shell handoff time to complete before uninitializing COM
+        Sleep(1000);
+
         if (SUCCEEDED(comHr)) {
             CoUninitialize();
         }
