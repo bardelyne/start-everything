@@ -3289,6 +3289,14 @@ static HWND FindStartMenuCoreWindow() {
         if (h && IsWindow(h)) return h;
     }
 
+    HWND hStart = FindWindowW(L"Windows.UI.Core.CoreWindow", L"Start");
+    if (hStart && IsWindow(hStart)) {
+        if (tray) {
+            SetPropW(tray, L"WindhawkStartMenuHwnd", hStart);
+        }
+        return hStart;
+    }
+
     HWND found = nullptr;
     EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
         if (GetPropW(hwnd, L"WindhawkStartMenuWindow")) {
@@ -3313,14 +3321,6 @@ static HWND FindStartMenuCoreWindow() {
             SetPropW(tray, L"WindhawkStartMenuHwnd", found);
         }
         return found;
-    }
-
-    HWND hStart = FindWindowW(L"Windows.UI.Core.CoreWindow", L"Start");
-    if (hStart && IsWindow(hStart)) {
-        if (tray) {
-            SetPropW(tray, L"WindhawkStartMenuHwnd", hStart);
-        }
-        return hStart;
     }
 
     return nullptr;
@@ -4421,29 +4421,8 @@ void TakeForeground(bool force = false) {
             return;
         }
 
-        DWORD ourWindowTid = GetWindowThreadProcessId(ours, nullptr);
-        DWORD currentTid = current ? GetWindowThreadProcessId(current, nullptr) : 0;
-        DWORD callerTid = GetCurrentThreadId();
-
-        // Simulate Alt press/release to bypass Windows foreground restriction
-        keybd_event(VK_MENU, 0, 0, 0);
-        keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-
-        if (currentTid && currentTid != callerTid) {
-            AttachThreadInput(callerTid, currentTid, TRUE);
-            if (ourWindowTid && ourWindowTid != callerTid && ourWindowTid != currentTid) {
-                AttachThreadInput(ourWindowTid, currentTid, TRUE);
-            }
-            SetForegroundWindow(ours);
-            BringWindowToTop(ours);
-            if (ourWindowTid && ourWindowTid != callerTid && ourWindowTid != currentTid) {
-                AttachThreadInput(ourWindowTid, currentTid, FALSE);
-            }
-            AttachThreadInput(callerTid, currentTid, FALSE);
-        } else {
-            SetForegroundWindow(ours);
-            BringWindowToTop(ours);
-        }
+        SetForegroundWindow(ours);
+        BringWindowToTop(ours);
     } catch (...) {
     }
 }
@@ -4533,9 +4512,17 @@ void DismissStartMenu() {
         g_isHiding.store(false);
         if (g_revealAnim) g_revealAnim.Stop();
         if (g_hideAnim) g_hideAnim.Stop();
-        keybd_event(VK_ESCAPE, 0, 0, 0);
-        keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0);
-        Wh_Log(L"DismissStartMenu: sent dismiss signal");
+
+        HWND ours = GetOurCoreWindow();
+        if (ours && IsWindow(ours)) {
+            PostMessageW(ours, WM_KEYDOWN, VK_ESCAPE, 0x00010001);
+            PostMessageW(ours, WM_KEYUP, VK_ESCAPE, 0xC0010001);
+            Wh_Log(L"DismissStartMenu: posted targeted VK_ESCAPE to CoreWindow %p", ours);
+        } else {
+            keybd_event(VK_ESCAPE, 0, 0, 0);
+            keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0);
+            Wh_Log(L"DismissStartMenu: sent fallback dismiss signal");
+        }
     } catch (...) {
     }
 }
