@@ -73,6 +73,35 @@ for ($idx = 0; $idx -lt $conversions.Count; $idx++) {
     Set-ItemProperty -Path $kSettings -Name "unitConversions[$idx].category" -Value $conversions[$idx].category
 }
 
+# 1c. Populate default filterNoisyPaths and 14 excludedPaths patterns into Settings registry
+Set-ItemProperty $kSettings -Name 'filterNoisyPaths' -Value 1 -Type DWord
+
+$noisyPaths = @(
+    '\node_modules\',
+    '\.git\',
+    '\.gradle\',
+    '\appdata\local\temp\',
+    '\appdata\local\packages\',
+    '\__pycache__\',
+    '\.venv\',
+    '\site-packages\',
+    '\.cache\',
+    '\build\intermediates\',
+    '\obj\debug\',
+    '\obj\release\',
+    '\windows\winsxs\',
+    '\windows\servicing\'
+)
+
+$curExcluded = (Get-ItemProperty -Path $kSettings).psobject.Properties | Where-Object { $_.Name -like 'excludedPaths*' }
+foreach ($p in $curExcluded) {
+    Remove-ItemProperty -Path $kSettings -Name $p.Name -ErrorAction SilentlyContinue
+}
+
+for ($idx = 0; $idx -lt $noisyPaths.Count; $idx++) {
+    Set-ItemProperty -Path $kSettings -Name "excludedPaths[$idx]" -Value $noisyPaths[$idx]
+}
+
 # 2. Disable old standalone and test mods to avoid duplicate hooks
 foreach ($oldMod in @('local@searchhost-disconnect', 'local@prevent-searchhost-focus', 'local@start-everything-notap', 'local@start-everything-fix')) {
     $kOld = "HKLM:\SOFTWARE\Windhawk\Engine\Mods\$oldMod"
