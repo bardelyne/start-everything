@@ -3058,19 +3058,15 @@ static BOOL WINAPI Hook_Explorer_SetForegroundWindow(HWND hWnd) {
         return pOriginalExplorerSetForegroundWindow(hWnd);
     }
 
+    // Explicitly authorize StartMenuExperienceHost and any child window to gain foreground
+    AllowSetForegroundWindow(ASFW_ANY);
+
     DWORD targetPid = 0;
     GetWindowThreadProcessId(hWnd, &targetPid);
 
     if (IsProcessNamed(targetPid, L"SearchHost.exe")) {
-        Wh_Log(L"[Explorer] Blocked SetForegroundWindow to SearchHost.exe (0x%p)", hWnd);
-
-        // Redirect shell foreground activation directly to Start Menu CoreWindow
-        HWND hStart = FindStartMenuCoreWindow();
-        if (hStart && IsWindow(hStart)) {
-            Wh_Log(L"[Explorer] Preserving foreground on StartMenu window 0x%p", hStart);
-            pOriginalExplorerSetForegroundWindow(hStart);
-        }
-        return TRUE; // Pretend success
+        Wh_Log(L"[Explorer] SetForegroundWindow to SearchHost.exe (0x%p) -> allowing SearchHost focus for soft handoff", hWnd);
+        return pOriginalExplorerSetForegroundWindow(hWnd);
     }
 
     return pOriginalExplorerSetForegroundWindow(hWnd);
@@ -3081,15 +3077,11 @@ static Explorer_BringWindowToTop_t pOriginalExplorerBringWindowToTop = nullptr;
 
 static BOOL WINAPI Hook_Explorer_BringWindowToTop(HWND hWnd) {
     if (!hWnd) return pOriginalExplorerBringWindowToTop(hWnd);
+    AllowSetForegroundWindow(ASFW_ANY);
     DWORD targetPid = 0;
     GetWindowThreadProcessId(hWnd, &targetPid);
     if (IsProcessNamed(targetPid, L"SearchHost.exe")) {
-        Wh_Log(L"[Explorer] Blocked BringWindowToTop to SearchHost.exe (0x%p)", hWnd);
-        HWND hStart = FindStartMenuCoreWindow();
-        if (hStart && IsWindow(hStart)) {
-            pOriginalExplorerBringWindowToTop(hStart);
-        }
-        return TRUE;
+        return pOriginalExplorerBringWindowToTop(hWnd);
     }
     return pOriginalExplorerBringWindowToTop(hWnd);
 }
@@ -3099,17 +3091,14 @@ static Explorer_SwitchToThisWindow_t pOriginalExplorerSwitchToThisWindow = nullp
 
 static void WINAPI Hook_Explorer_SwitchToThisWindow(HWND hWnd, BOOL fAltTab) {
     if (!hWnd) return;
+    AllowSetForegroundWindow(ASFW_ANY);
     DWORD targetPid = 0;
     GetWindowThreadProcessId(hWnd, &targetPid);
     if (IsProcessNamed(targetPid, L"SearchHost.exe")) {
-        Wh_Log(L"[Explorer] Blocked SwitchToThisWindow to SearchHost.exe (0x%p)", hWnd);
-        HWND hStart = FindStartMenuCoreWindow();
-        if (hStart && IsWindow(hStart)) {
-            if (pOriginalExplorerSwitchToThisWindow) {
-                pOriginalExplorerSwitchToThisWindow(hStart, fAltTab);
-            } else {
-                SetForegroundWindow(hStart);
-            }
+        if (pOriginalExplorerSwitchToThisWindow) {
+            pOriginalExplorerSwitchToThisWindow(hWnd, fAltTab);
+        } else {
+            SetForegroundWindow(hWnd);
         }
         return;
     }
@@ -3438,90 +3427,28 @@ static BOOL WINAPI Hook_SearchHost_CreateProcessW(
                                   currentDirectory, startupInfo, processInformation);
 }
 
-using CreateFileW_t = decltype(&CreateFileW);
-static CreateFileW_t pOriginalCreateFileW = nullptr;
-
-static bool IsRestrictedDatabaseFile(LPCWSTR lpFileName) {
-    if (!lpFileName) return false;
-    std::wstring lower(lpFileName);
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-
-    return (lower.find(L"appsindex.db") != std::wstring::npos ||
-            lower.find(L"settings.db") != std::wstring::npos ||
-            lower.find(L"windows.edb") != std::wstring::npos);
-}
-
-static HANDLE WINAPI Hook_SearchHost_CreateFileW(
-    LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
-    DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
-    thread_local bool inHook = false;
-    if (inHook) {
-        return pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode,
-                                    lpSecurityAttributes, dwCreationDisposition,
-                                    dwFlagsAndAttributes, hTemplateFile);
-    }
-    DisconnectRecursionGuard guard(inHook);
-
-    if (IsRestrictedDatabaseFile(lpFileName)) {
-        Wh_Log(L"[SearchHost] Blocked access to search database: %ls", lpFileName);
-        SetLastError(ERROR_FILE_NOT_FOUND);
-        return INVALID_HANDLE_VALUE;
-    }
-
-    return pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode,
-                                lpSecurityAttributes, dwCreationDisposition,
-                                dwFlagsAndAttributes, hTemplateFile);
-}
-
-using CoCreateInstance_t = decltype(&CoCreateInstance);
-static CoCreateInstance_t pOriginalCoCreateInstance = nullptr;
-
-static const GUID kSearchManager = {0x7D096C5F, 0xAC08, 0x4F1F, {0xBE, 0xB7, 0x5C, 0x22, 0xC5, 0x17, 0xCE, 0x39}};
-static const GUID kCollatorUtilities = {0x9E175B8B, 0xF52A, 0x11D8, {0xB9, 0xA5, 0x50, 0x50, 0x54, 0x50, 0x30, 0x30}};
-static const GUID kSearchQuery = {0x0B63E349, 0x9CCC, 0x11D0, {0xBC, 0xDB, 0x00, 0x80, 0x5F, 0xCC, 0xCE, 0x04}};
-static const GUID kSearchFolder = {0x323CA680, 0xC24D, 0x4099, {0xB9, 0xD4, 0x44, 0x6D, 0xD2, 0xD7, 0x24, 0x9E}};
-
-static HRESULT WINAPI Hook_SearchHost_CoCreateInstance(
-    REFCLSID rclsid, LPUNKNOWN pUnkOuter, DWORD dwClsContext,
-    REFIID riid, LPVOID* ppv) {
-    thread_local bool inHook = false;
-    if (inHook) {
-        return pOriginalCoCreateInstance(rclsid, pUnkOuter, dwClsContext, riid, ppv);
-    }
-    DisconnectRecursionGuard guard(inHook);
-
-    if (IsEqualGUID(rclsid, kSearchManager) ||
-        IsEqualGUID(rclsid, kCollatorUtilities) ||
-        IsEqualGUID(rclsid, kSearchQuery) ||
-        IsEqualGUID(rclsid, kSearchFolder)) {
-        Wh_Log(L"[SearchHost] Blocked Windows Search COM activation");
-        if (ppv) *ppv = nullptr;
-        return REGDB_E_CLASSNOTREG;
-    }
-
-    return pOriginalCoCreateInstance(rclsid, pUnkOuter, dwClsContext, riid, ppv);
-}
-
 static LRESULT CALLBACK SearchHostSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, DWORD_PTR dwRefData) {
     if (uMsg == WM_ACTIVATE) {
         if (LOWORD(wParam) != WA_INACTIVE) {
             Wh_Log(L"[SearchHost] WM_ACTIVATE (active) on 0x%p -> redirecting foreground to StartMenu", hWnd);
+            AllowSetForegroundWindow(ASFW_ANY);
             HWND hStart = FindStartMenuCoreWindow();
             if (hStart && IsWindow(hStart)) {
                 SetForegroundWindow(hStart);
                 BringWindowToTop(hStart);
             }
+            ShowWindow(hWnd, SW_HIDE);
             return 0;
         }
     } else if (uMsg == WM_SETFOCUS) {
         Wh_Log(L"[SearchHost] WM_SETFOCUS on 0x%p -> redirecting foreground to StartMenu", hWnd);
+        AllowSetForegroundWindow(ASFW_ANY);
         HWND hStart = FindStartMenuCoreWindow();
         if (hStart && IsWindow(hStart)) {
             SetForegroundWindow(hStart);
             BringWindowToTop(hStart);
         }
+        ShowWindow(hWnd, SW_HIDE);
         return 0;
     } else if (uMsg == WM_WINDOWPOSCHANGING) {
         WINDOWPOS* wp = reinterpret_cast<WINDOWPOS*>(lParam);
@@ -3537,6 +3464,7 @@ using SetForegroundWindow_t = BOOL(WINAPI*)(HWND);
 static SetForegroundWindow_t pOrigSearchHostSetForegroundWindow = nullptr;
 static BOOL WINAPI Hook_SearchHost_SetForegroundWindow(HWND hWnd) {
     Wh_Log(L"[SearchHost] SetForegroundWindow called for 0x%p", hWnd);
+    AllowSetForegroundWindow(ASFW_ANY);
     HWND hStart = FindStartMenuCoreWindow();
     if (hStart && IsWindow(hStart)) {
         Wh_Log(L"[SearchHost] Redirecting SetForegroundWindow to StartMenu 0x%p", hStart);
@@ -3550,6 +3478,7 @@ using BringWindowToTop_t = BOOL(WINAPI*)(HWND);
 static BringWindowToTop_t pOrigSearchHostBringWindowToTop = nullptr;
 static BOOL WINAPI Hook_SearchHost_BringWindowToTop(HWND hWnd) {
     Wh_Log(L"[SearchHost] BringWindowToTop called for 0x%p", hWnd);
+    AllowSetForegroundWindow(ASFW_ANY);
     HWND hStart = FindStartMenuCoreWindow();
     if (hStart && IsWindow(hStart)) {
         pOrigSearchHostBringWindowToTop(hStart);
@@ -3561,7 +3490,13 @@ using ShowWindow_t = BOOL(WINAPI*)(HWND, int);
 static ShowWindow_t pOrigSearchHostShowWindow = nullptr;
 static BOOL WINAPI Hook_SearchHost_ShowWindow(HWND hWnd, int nCmdShow) {
     if (nCmdShow == SW_SHOW || nCmdShow == SW_SHOWNORMAL || nCmdShow == SW_RESTORE || nCmdShow == SW_SHOWDEFAULT) {
-        Wh_Log(L"[SearchHost] Redirected SearchHost ShowWindow to SW_HIDE");
+        Wh_Log(L"[SearchHost] Redirected SearchHost ShowWindow to SW_HIDE with foreground return");
+        AllowSetForegroundWindow(ASFW_ANY);
+        HWND hStart = FindStartMenuCoreWindow();
+        if (hStart && IsWindow(hStart)) {
+            SetForegroundWindow(hStart);
+            BringWindowToTop(hStart);
+        }
         nCmdShow = SW_HIDE;
     }
     return pOrigSearchHostShowWindow(hWnd, nCmdShow);
@@ -3577,33 +3512,13 @@ static BOOL WINAPI Hook_SearchHost_SetWindowPos(HWND hWnd, HWND hWndInsertAfter,
     return pOrigSearchHostSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
 }
 
-using SwitchToThisWindow_t = void(WINAPI*)(HWND, BOOL);
-static SwitchToThisWindow_t pOrigSearchHostSwitchToThisWindow = nullptr;
-static void WINAPI Hook_SearchHost_SwitchToThisWindow(HWND hWnd, BOOL fAltTab) {
-    Wh_Log(L"[SearchHost] SwitchToThisWindow called for 0x%p", hWnd);
-    HWND hStart = FindStartMenuCoreWindow();
-    if (hStart && IsWindow(hStart)) {
-        SetForegroundWindow(hStart);
-    }
-}
-
 void InitSearchHost() {
     Wh_Log(L"=== start-everything: initializing SearchHost disconnect & suppression hooks ===");
     WindhawkUtils::SetFunctionHook(CreateProcessW, Hook_SearchHost_CreateProcessW, &pOriginalCreateProcessW);
-    WindhawkUtils::SetFunctionHook(CreateFileW, Hook_SearchHost_CreateFileW, &pOriginalCreateFileW);
-    WindhawkUtils::SetFunctionHook(CoCreateInstance, Hook_SearchHost_CoCreateInstance, &pOriginalCoCreateInstance);
     WindhawkUtils::SetFunctionHook(SetForegroundWindow, Hook_SearchHost_SetForegroundWindow, &pOrigSearchHostSetForegroundWindow);
     WindhawkUtils::SetFunctionHook(BringWindowToTop, Hook_SearchHost_BringWindowToTop, &pOrigSearchHostBringWindowToTop);
     WindhawkUtils::SetFunctionHook(ShowWindow, Hook_SearchHost_ShowWindow, &pOrigSearchHostShowWindow);
     WindhawkUtils::SetFunctionHook(SetWindowPos, Hook_SearchHost_SetWindowPos, &pOrigSearchHostSetWindowPos);
-
-    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
-    if (hUser32) {
-        auto pSwitch = (SwitchToThisWindow_t)GetProcAddress(hUser32, "SwitchToThisWindow");
-        if (pSwitch) {
-            WindhawkUtils::SetFunctionHook(pSwitch, Hook_SearchHost_SwitchToThisWindow, &pOrigSearchHostSwitchToThisWindow);
-        }
-    }
 }
 
 [[clang::no_destroy]] static std::optional<std::thread> g_searchHostWatchdog;
@@ -4327,25 +4242,10 @@ void TakeForeground(bool force = false) {
             return;
         }
 
-        DWORD ourWindowTid = GetWindowThreadProcessId(ours, nullptr);
-        DWORD currentTid = current ? GetWindowThreadProcessId(current, nullptr) : 0;
-        DWORD callerTid = GetCurrentThreadId();
-
-        if (currentTid && currentTid != callerTid) {
-            AttachThreadInput(callerTid, currentTid, TRUE);
-            if (ourWindowTid && ourWindowTid != callerTid && ourWindowTid != currentTid) {
-                AttachThreadInput(ourWindowTid, currentTid, TRUE);
-            }
-            SetForegroundWindow(ours);
-            BringWindowToTop(ours);
-            if (ourWindowTid && ourWindowTid != callerTid && ourWindowTid != currentTid) {
-                AttachThreadInput(ourWindowTid, currentTid, FALSE);
-            }
-            AttachThreadInput(callerTid, currentTid, FALSE);
-        } else {
-            SetForegroundWindow(ours);
-            BringWindowToTop(ours);
-        }
+        BOOL ok = SetForegroundWindow(ours);
+        BringWindowToTop(ours);
+        Wh_Log(L"focus: TakeForeground -> SetForegroundWindow result=%d, prev=0x%p, ours=0x%p",
+               ok ? 1 : 0, current, ours);
     } catch (...) {
     }
 }
@@ -4397,10 +4297,7 @@ void TriggerMenuOpenFocus() {
             }
             HWND ours = GetOurCoreWindow();
             HWND fg = GetForegroundWindow();
-            DWORD fgPid = 0;
-            if (fg) GetWindowThreadProcessId(fg, &fgPid);
-            // Reclaim foreground only from SearchHost if it temporarily stole it
-            if (fg != ours && (fg == nullptr || IsProcessNamed(fgPid, L"SearchHost.exe"))) {
+            if (fg != ours) {
                 TakeForeground();
             }
             FocusOurBoxNow();
