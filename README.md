@@ -4,7 +4,7 @@
 [![Everything](https://img.shields.io/badge/voidtools-Everything%20v1.4%20%7C%20v1.5a-orange.svg)](https://www.voidtools.com/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
 
-A high-performance, native replacement for Windows 11 Start Menu search powered directly by voidtools Everything. Completely severs SearchHost background telemetry, Bing web queries, and Edge WebView2 processes, replacing them with instantaneous sub-millisecond local file, application, and settings search directly inside the Start Menu.
+A native replacement for Windows 11 Start Menu search, powered by voidtools Everything. Type in the Start Menu to search files, apps, and settings instantly. Windows Search stays out of the way: its window is never shown, and it cannot start the Edge WebView2 process behind its Bing-backed search panel. Win+S and the taskbar search icon open this search too.
 
 ![Everything & Power Tools in the Start Menu](screenshot.png)
 
@@ -12,18 +12,19 @@ A high-performance, native replacement for Windows 11 Start Menu search powered 
 
 ## Highlights and Key Features
 
-- **Instant voidtools Everything IPC**: Sub-millisecond file querying directly through the Everything Win32 IPC interface. Instant results across millions of files without background indexing lag or disk thrashing.
+- **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
 - **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, and Windows Settings URIs (`ms-settings:`), with high-resolution shell icons.
-- **On-Demand Animated Palette**: The Start Menu stays completely clean and uncluttered when idle. The search palette smoothly reveals with a 140ms ease-out animation the moment you type or click the top search trigger, and collapses on empty or Escape.
-- **Complete SearchHost Disconnection**: Intercepts process creation, database access, and COM activation in `SearchHost.exe` to completely eliminate background Bing web queries, Edge WebView2 child processes, and indexing CPU spikes without breaking system stability.
+- **On-Demand Animated Palette**: The Start Menu stays completely clean and uncluttered when idle. The search palette slides in with a short ease-out animation the moment you type or click the search box, and collapses when emptied or on Escape.
+- **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
+- **Win+S and the Search Icon**: Win+S and the taskbar search icon open the Start Menu with this search instead of the Windows search panel.
 - **Inline Calculator**: Type `/c <expression>` (e.g. `/c 100 * 5`, `/c sqrt(144)`, `/c 15% of 200`, `/c 2^10`) to calculate math on the fly. Press Enter to copy the result directly to your clipboard.
 - **Configurable Unit Conversions**: Type `/c <number> [unit]` to run unit conversions driven entirely by formulas defined in Mod Settings. Users can add, edit, or delete conversions item-by-item from the settings UI.
 - **Network Interface Inspector**: Type `/ip` to display all active Wi-Fi, Ethernet, and VPN network interfaces with their IP addresses, subnet masks, gateways, and hardware descriptions. Press Enter to copy the IP.
 - **Full Right-Click Context Menu**: Right-click any file, folder, or application to Open, Run as Administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy (files), Copy path, or Open file location.
-- **Explorer Shell Property Relay**: Crosses the AppContainer isolation boundary to display native Windows property sheets hosted directly by `explorer.exe`.
+- **Native Properties Dialogs**: Properties opens through `explorer.exe`, the same dialog as in File Explorer.
 - **Explicit Web Search**: Trigger web searches on demand using the `?` prefix (e.g. `?query`). Includes customizable keyword shortcuts such as `?yt` (YouTube), `?gh` (GitHub), `?w` (Wikipedia), and `?r` (Reddit).
 - **Start Menu Styler Compatibility**: Automatically adopts background styles (Tinted Glass, Acrylic, custom theme colors) in real time without needing to restart the mod.
-- **Native Win32 Message Routing**: Clean focus management and window message dispatching without thread input attachment or synthetic key hacks.
+- **No Input Injection**: Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
 - **Accidental Open Prevention**: Enter only triggers actions when an item is selected in the active panel, preventing unintended opening of files.
 
 ---
@@ -33,8 +34,8 @@ A high-performance, native replacement for Windows 11 Start Menu search powered 
 ```mermaid
 graph TD
     subgraph Explorer_Process ["explorer.exe (Desktop Shell)"]
-        T["Taskbar / Start Button"]
-        FOC["Focus Guard (Protected SetForegroundWindow)"]
+        T["Taskbar / Start Button / Win+S / Search Icon"]
+        GUARD["Search Guard (Search shown without Start -> SC_TASKLIST)"]
         PROP["Explorer Shell Property Relay (StartEverything_ExplorerHost)"]
     end
 
@@ -48,10 +49,10 @@ graph TD
         TOOLS["Tools & Utilities (Calc, Unit Conv, Network Interfaces)"]
     end
 
-    subgraph Search_Host ["SearchHost.exe (Disconnected Sandbox)"]
+    subgraph Search_Host ["SearchHost.exe (Kept Invisible)"]
         WV_HOOK["CreateProcessW Hook: Blocks WebView2 & Indexer"]
-        DB_HOOK["CreateFileW Hook: Blocks Search Index DBs"]
-        COM_HOOK["CoCreateInstance Hook: Blocks Search CLSIDs"]
+        HIDE["CoreWindow at Zero Alpha (Never Drawn)"]
+        GRANT["Foreground Grant to Start (on Request)"]
     end
 
     subgraph Everything_Engine ["Everything Engine"]
@@ -65,17 +66,16 @@ graph TD
     BOX -->|"Query Text"| APPS
     BOX -->|"Tools (/c, /ip)"| TOOLS
     BOX -->|"WM_COPYDATA IPC"| EV
-    EV -->|"Instant Results (<5ms)"| PAL
-    APPS -->|"Instant App Hits"| PAL
+    EV -->|"File Results"| PAL
+    APPS -->|"App Hits"| PAL
     TOOLS -->|"Utility Cards"| PAL
 
-    FOC -->|"Preserves Focus"| SM
+    GUARD -->|"Opens Start"| SM
+    SM -->|"Asks for Foreground"| GRANT
     PAL -->|"Properties (WM_COPYDATA)"| PROP
     PROP -->|"SHObjectProperties / ShellExecuteEx"| DESK["Native Properties Sheet"]
 
     WV_HOOK -.->|"Denied"| WV["msedgewebview2.exe (BLOCKED)"]
-    DB_HOOK -.->|"Not Found"| DB["Search Databases (SUPPRESSED)"]
-    COM_HOOK -.->|"Denied"| CLSID["Search CLSIDs (SEVERED)"]
 ```
 
 ---
@@ -119,7 +119,7 @@ When right-clicking any file, folder, or application:
 - **Properties**: Displays the native Windows properties dialog sheet for the file, folder, or application via the Explorer Shell Relay host.
 - **Open file location**: Opens the parent folder in File Explorer and selects the target item.
 - **Copy path**: Copies the absolute file path as plain text (`CF_UNICODETEXT`). Does not close the Start Menu.
-- **Create desktop shortcut**: Instantly creates a `.lnk` shortcut on the user's Desktop for files, folders, Win32 apps, or UWP packages. Existing shortcuts are never overwritten.
+- **Create desktop shortcut**: Instantly creates a `.lnk` shortcut on the user's Desktop for files, folders, Win32 apps, or UWP packages. Existing shortcuts are never overwritten. Does not close the Start Menu.
 - **Cut**: *(Files panel)* Places the file on the Windows clipboard using shell `CF_HDROP` with `DROPEFFECT_MOVE`. Pasting in any File Explorer folder or Desktop moves the file. Does not close the Start Menu.
 - **Copy**: *(Files panel)* Places the file on the Windows clipboard using shell `CF_HDROP` with `DROPEFFECT_COPY`. Pasting in any File Explorer folder or Desktop duplicates the file. Does not close the Start Menu.
 
@@ -138,9 +138,10 @@ All settings can be customized in the Windhawk UI under **Everything & Power Too
 
 - **Max App Results**: Number of application matches displayed in the Apps column (default 6).
 - **Max File Results**: Number of file matches displayed in the Files column (default 12).
+- **Search Debounce Delay (ms)**: How long to let rapid typing settle before searching (default 25 ms, 0 for instant).
 - **Show Keyboard Shortcuts Bar**: Toggle display of the bottom shortcuts hint bar.
-- **Demote Noisy Paths**: Automatically demote deep build caches, version control internals, and temporary directories to the bottom of file search results.
-- **Excluded Path Patterns**: Paths matching any configured substrings (e.g. `\node_modules\`, `\.git\`, `\build\`, `\winsxs\`) will be demoted so build artifacts and internal system files do not clutter top matches.
+- **Filter Noisy Paths**: Hide deep build caches, version control internals, and temporary directories from file results, unless nothing else matches.
+- **Excluded Path Patterns**: Paths containing any of these substrings (e.g. `\node_modules\`, `\.git\`, `\build\intermediates\`, `\windows\winsxs\`) are treated the same way, so build artifacts and internal system files do not clutter results.
 - **Default Search Engine URL**: URL template for web search queries (default DuckDuckGo: `https://duckduckgo.com/?q={q}`).
 - **Web Search Shortcuts**: Define custom prefix keywords and target URLs (e.g. `yt` for YouTube, `gh` for GitHub, `w` for Wikipedia, `r` for Reddit).
 - **Custom Unit Conversions**: Fully configurable unit conversions for `/c <number> [unit]`. Manage conversion formulas item-by-item:
@@ -153,18 +154,18 @@ All settings can be customized in the Windhawk UI under **Everything & Power Too
 ## How It Works Internally
 
 ### 1. High-Performance Win32 IPC
-Rather than relying on COM search indexers or external broker daemons, the mod communicates directly with voidtools Everything's `EVERYTHING_IPC_WNDCLASS` hidden window via Win32 `WM_COPYDATA`. Queries execute with sub-millisecond round-trip response times across millions of indexed files.
+Rather than relying on COM search indexers or external broker daemons, the mod communicates directly with voidtools Everything's `EVERYTHING_IPC_WNDCLASS` hidden window via Win32 `WM_COPYDATA`, with results across millions of indexed files typically back in tens of milliseconds.
 
-### 2. Complete SearchHost Disconnection
-Rather than hardcoding version-specific DLL byte offsets (which break on cumulative updates) or killing `SearchHost.exe` (which triggers high-CPU restart loops), the mod hooks standard Win32 and COM entry points within `SearchHost.exe`:
-- `CreateProcessW`: Denies execution of `msedgewebview2.exe` and `searchindexer.exe`.
-- `CreateFileW`: Returns file-not-found for internal search databases (`appsindex.db`, `settings.db`, `windows.edb`).
-- `CoCreateInstance`: Denies activation of Windows Search COM CLSIDs.
+### 2. Windows Search, Kept Out of the Way
+Windows gives `SearchHost.exe` the foreground whenever Start or Search opens, so the mod works with it rather than against it. Nothing about how the shell shows, hides, or activates it is blocked:
+- `CreateProcessW`: Denies launching `msedgewebview2.exe` and `searchindexer.exe`, so its web view never starts.
+- Its window is drawn at zero alpha, so it never appears and clicks pass through it.
+- It grants the Start menu the foreground when the Start menu asks for it; the Start menu then takes it itself.
 
-This ensures SearchHost stays completely quiet: 0% CPU, 0 web requests, and Edge WebView2 processes never spawn.
+In `explorer.exe`, a guard watches public window events: whenever Search is showing while Start is closed and you are still on one of the two (Win+S, the taskbar search icon, or a key typed a few milliseconds after the Windows key), it opens the Start menu with the documented `WM_SYSCOMMAND` / `SC_TASKLIST` command. No keystrokes are injected, and nothing runs in Explorer's own foreground path.
 
 ### 3. Explorer Shell Property Relay
-`StartMenuExperienceHost.exe` runs inside an AppContainer sandbox, which restricts loading desktop shell property sheet extensions (`IShellPropSheetExt`). The mod resolves this by injecting into `explorer.exe` (Medium integrity desktop shell) and creating a dedicated STA host window (`StartEverything_ExplorerHost`). When "Properties" is clicked in the Start Menu, a message is securely relayed across the UIPI isolation boundary, allowing `explorer.exe` to launch the native properties dialog sheet cleanly.
+Properties dialogs are opened by `explorer.exe`, like in File Explorer. The mod creates a small STA host window there (`StartEverything_ExplorerHost`); when "Properties" is clicked in the Start Menu, the path is sent to it with `WM_COPYDATA`, checked (local and existing), and opened with `SHObjectProperties`.
 
 ### 4. Dynamic Theme and Acrylic Synchronization
 When using Windhawk's Windows 11 Start Menu Styler or custom system themes:
@@ -181,14 +182,12 @@ When using Windhawk's Windows 11 Start Menu Styler or custom system themes:
 
 ---
 
-## Recommended Setup: Hide Taskbar Search
+## Taskbar Search
 
-In Windows 11, clicking or typing into the taskbar search box opens the standalone `SearchHost.exe` flyout rather than `StartMenuExperienceHost.exe`. Because this mod replaces Start Menu search and disconnects SearchHost background queries, it is strongly recommended to hide the search icon/box from your taskbar:
+The Windows key, the Start button, Win+S, and the taskbar search icon all open this search. The full taskbar search box is not supported, so set Search to **Search icon only** or **Hide**:
 
 1. Right-click an empty area on the Taskbar and select **Taskbar settings** (or navigate to **Settings** > **Personalization** > **Taskbar**).
-2. Under **Taskbar items**, set **Search** to **Hide**.
-
-With the taskbar search box hidden, all searches are seamlessly routed through the native Start Menu whenever you press the Windows key or click the Start button.
+2. Under **Taskbar items**, set **Search** to **Search icon only** or **Hide**.
 
 ---
 
