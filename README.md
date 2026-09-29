@@ -100,8 +100,11 @@ graph TD
 | **Type any key** | Automatically reveals the search palette, focuses the search box, and queries apps and files |
 | **Click Search Area** | Clicks header trigger area to reveal search palette and focus search box |
 | **Up / Down Arrow Keys** | Navigate selection through applications, utility cards, and files |
+| **Tab / Shift + Tab** | Move to the next / previous result, through the apps and on into the files |
+| **Left / Right Arrow Keys** | Switch between the Apps and Files columns (Right only with the cursor at the end of the query, so the arrows still move the cursor while you edit) |
 | **Enter** | Launch selected application, copy calculation/conversion/IP result, or open item |
 | **Ctrl + Enter** | Run selected application or file as Administrator (triggers UAC) |
+| **Shift + Enter** | Open the selected result's context menu (same as right-click); navigate it with the arrow keys and Enter |
 | **Escape** | Clear search text and smoothly collapse search palette back to pinned apps |
 | **Right-Click** | Open context menu (Open, Run as administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy, Copy path, Open file location) |
 
@@ -138,7 +141,7 @@ All settings can be customized in the Windhawk UI under **Everything & Power Too
 
 - **Max App Results**: Number of application matches displayed in the Apps column (default 6).
 - **Max File Results**: Number of file matches displayed in the Files column (default 12).
-- **Search Debounce Delay (ms)**: How long to let rapid typing settle before searching (default 25 ms, 0 for instant).
+- **Search Debounce Delay (ms)**: Extra delay before searching, to let typing settle (default 0, instant). Rarely needed: while a search runs, new keystrokes already wait and only the latest text is searched.
 - **Show Keyboard Shortcuts Bar**: Toggle display of the bottom shortcuts hint bar.
 - **Filter Noisy Paths**: Hide deep build caches, version control internals, and temporary directories from file results, unless nothing else matches.
 - **Excluded Path Patterns**: Paths containing any of these substrings (e.g. `\node_modules\`, `\.git\`, `\build\intermediates\`, `\windows\winsxs\`) are treated the same way, so build artifacts and internal system files do not clutter results.
