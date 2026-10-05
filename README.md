@@ -14,7 +14,7 @@ A native replacement for Windows 11 Start Menu search, powered by voidtools Ever
 
 - **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
 - **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, and Windows Settings URIs (`ms-settings:`), with sharp shell icons, made at the exact pixel size of your display.
-- **Learns Your Favorites**: Apps you open from here more often move up among results that match equally well. A clearly better match always stays on top.
+- **Learns Your Favorites**: Apps you open from here more often move up among results that match equally well. A clearly better match always stays on top. Can be turned off in the settings, which also forgets what was learned.
 - **On-Demand Animated Palette**: The Start Menu stays completely clean and uncluttered when idle. The search palette slides in with a short ease-out animation the moment you type or click the search box, and collapses when emptied or on Escape.
 - **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
 - **Win+S and the Search Icon**: Win+S and the taskbar search icon open the Start Menu with this search instead of the Windows search panel.
@@ -148,6 +148,7 @@ All settings can be customized in the Windhawk UI under **Everything & Power Too
 - **Max App Results**: Number of application matches displayed in the Apps column (default 6).
 - **Max File Results**: Number of file matches displayed in the Files column (default 12).
 - **Search Debounce Delay (ms)**: Extra delay before searching, to let typing settle (default 0, instant). Rarely needed: while a search runs, new keystrokes already wait and only the latest text is searched.
+- **Learn Favorite Apps**: Rank the apps you open more often first among equally good matches (default on). Turning it off stops counting and forgets the apps learned so far; turn it on again to start over.
 - **Show Keyboard Shortcuts Bar**: Toggle display of the bottom shortcuts hint bar.
 - **Filter Noisy Paths**: Hide deep build caches, version control internals, and temporary directories from file results, unless nothing else matches.
 - **Excluded Path Patterns**: Paths containing any of these substrings (e.g. `\node_modules\`, `\.git\`, `\build\intermediates\`, `\windows\winsxs\`) are treated the same way, so build artifacts and internal system files do not clutter results.
