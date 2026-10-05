@@ -13,7 +13,8 @@ A native replacement for Windows 11 Start Menu search, powered by voidtools Ever
 ## Highlights and Key Features
 
 - **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
-- **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, and Windows Settings URIs (`ms-settings:`), with high-resolution shell icons.
+- **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, and Windows Settings URIs (`ms-settings:`), with sharp shell icons, made at the exact pixel size of your display.
+- **Learns Your Favorites**: Apps you open from here more often move up among results that match equally well. A clearly better match always stays on top.
 - **On-Demand Animated Palette**: The Start Menu stays completely clean and uncluttered when idle. The search palette slides in with a short ease-out animation the moment you type or click the search box, and collapses when emptied or on Escape.
 - **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
 - **Win+S and the Search Icon**: Win+S and the taskbar search icon open the Start Menu with this search instead of the Windows search panel.
@@ -22,6 +23,7 @@ A native replacement for Windows 11 Start Menu search, powered by voidtools Ever
 - **Network Interface Inspector**: Type `/ip` to display all active Wi-Fi, Ethernet, and VPN network interfaces with their IP addresses, subnet masks, gateways, and hardware descriptions. Press Enter to copy the IP.
 - **Full Right-Click Context Menu**: Right-click any file, folder, or application to Open, Run as Administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy (files), Copy path, or Open file location.
 - **Native Properties Dialogs**: Properties opens through `explorer.exe`, the same dialog as in File Explorer.
+- **Opens in Front**: Programs are started by Explorer, the way the stock Start menu starts them, so they come to the front even when they take a while to start or you move the mouse meanwhile.
 - **Explicit Web Search**: Trigger web searches on demand using the `?` prefix (e.g. `?query`). Includes customizable keyword shortcuts such as `?yt` (YouTube), `?gh` (GitHub), `?w` (Wikipedia), and `?r` (Reddit).
 - **Start Menu Styler Compatibility**: Automatically adopts background styles (Tinted Glass, Acrylic, custom theme colors) in real time without needing to restart the mod.
 - **No Input Injection**: Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
@@ -36,7 +38,8 @@ graph TD
     subgraph Explorer_Process ["explorer.exe (Desktop Shell)"]
         T["Taskbar / Start Button / Win+S / Search Icon"]
         GUARD["Search Guard (Search shown without Start -> SC_TASKLIST)"]
-        PROP["Explorer Shell Property Relay (StartEverything_ExplorerHost)"]
+        PROP["Explorer Helper Host (StartEverything_ExplorerHost)"]
+        SHD["Desktop IShellDispatch2 (ShellExecute)"]
     end
 
     subgraph Start_Menu ["StartMenuExperienceHost.exe (Start Menu UI)"]
@@ -74,6 +77,9 @@ graph TD
     SM -->|"Asks for Foreground"| GRANT
     PAL -->|"Properties (WM_COPYDATA)"| PROP
     PROP -->|"SHObjectProperties / ShellExecuteEx"| DESK["Native Properties Sheet"]
+    PAL -->|"Open: foreground to the helper host"| PROP
+    PAL -->|"Open: ShellExecute in Explorer"| SHD
+    SHD -->|"Started by Explorer"| PROG["Opened Program (comes to the front)"]
 
     WV_HOOK -.->|"Denied"| WV["msedgewebview2.exe (BLOCKED)"]
 ```
@@ -102,7 +108,7 @@ graph TD
 | **Up / Down Arrow Keys** | Navigate selection through applications, utility cards, and files |
 | **Tab / Shift + Tab** | Move to the next / previous result, through the apps and on into the files |
 | **Left / Right Arrow Keys** | Switch between the Apps and Files columns (Right only with the cursor at the end of the query, so the arrows still move the cursor while you edit) |
-| **Enter** | Launch selected application, copy calculation/conversion/IP result, or open item |
+| **Enter** | Launch selected application, copy calculation/conversion/IP result, or open item. Pressed before the results for what you typed are in, it opens the first one as soon as they arrive |
 | **Ctrl + Enter** | Run selected application or file as Administrator (triggers UAC) |
 | **Shift + Enter** | Open the selected result's context menu (same as right-click); navigate it with the arrow keys and Enter |
 | **Escape** | Clear search text and smoothly collapse search palette back to pinned apps |
@@ -170,7 +176,10 @@ In `explorer.exe`, a guard watches public window events: whenever Search is show
 ### 3. Explorer Shell Property Relay
 Properties dialogs are opened by `explorer.exe`, like in File Explorer. The mod creates a small STA host window there (`StartEverything_ExplorerHost`); when "Properties" is clicked in the Start Menu, the path is sent to it with `WM_COPYDATA`, checked (local and existing), and opened with `SHObjectProperties`.
 
-### 4. Dynamic Theme and Acrylic Synchronization
+### 4. Programs Started by Explorer
+The Start menu's own `ShellExecute` is carried out for it by `sihost.exe`, so a program opened that way is not started by the foreground process, and Windows takes away its right to come to the front on the next keystroke or mouse move: a program slow to show its window opened behind the app you were in. Like the stock Start menu, the mod hands the foreground to Explorer (its `StartEverything_ExplorerHost` window) and has Explorer start the program, through the desktop's documented `IShellDispatch2::ShellExecute`. Apps are opened by their `shell:AppsFolder` name, so what their shortcut passes is kept. Run as administrator still goes straight to UAC.
+
+### 5. Dynamic Theme and Acrylic Synchronization
 When using Windhawk's Windows 11 Start Menu Styler or custom system themes:
 - **Visual Tree Re-attachment**: If Start Menu Styler reloads control templates, the mod automatically detects visual tree changes, cleans dangling references, and re-attaches the search palette to the active container.
 - **Dynamic Background Sync**: `SyncOverlayBackground()` inspects `Border#AcrylicBorder` on every reveal, automatically syncing Tinted Glass, custom Acrylic, or themed brushes without requiring mod restarts.
