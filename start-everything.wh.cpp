@@ -3823,9 +3823,6 @@ inline std::wstring NormalizeUnit(const std::wstring& unitRaw) {
 #pragma pop_macro("GetCurrentTime")
 
 #include <robuffer.h>
-#ifndef WH_MOD_ID
-#define WH_MOD_ID L"start-everything"
-#endif
 #include <windhawk_utils.h>
 
 namespace wf = winrt::Windows::Foundation;
