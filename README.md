@@ -48,8 +48,8 @@ Version **2.0** moves search into its own Windows 11 window while keeping Start 
 - **Uninstall**: Right-click an app and choose Uninstall. After a confirmation that names what goes, a Store app is removed as Start removes it, and a program runs its own uninstaller, the one Installed apps in Settings runs. Protected Windows components offer no uninstall action. A Store app is removed in the background, with no progress bar: it is gone from the list after a few seconds.
 - **Opens in Front**: Programs are started by Explorer, the way the stock Start menu starts them, so they come to the front even when they take a while to start or you move the mouse meanwhile.
 - **Explicit Web Search**: Trigger web searches on demand using the `?` prefix (e.g. `?query`). Includes customizable keyword shortcuts such as `?yt` (YouTube), `?gh` (GitHub), `?w` (Wikipedia), and `?r` (Reddit).
-- **Start Menu Styler Compatibility**: Copies supported Start backgrounds, colors, rounded corners, and menu styling before menus appear. Automatic text/icon contrast or a fixed text color keeps labels readable; see [Automatic Text and Icon Contrast](#automatic-text-and-icon-contrast). Arbitrary custom Styler effects may not be reproduced exactly.
-- **No Simulated Keystrokes**: Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
+- **Start Menu Styler Compatibility**: Reads Start's rendered `AcrylicBorder`, search box, and opened context menus from its live visual tree, with a best-effort read of Start Menu Styler's Windhawk registry settings for `WindhawkBlur` parameters and unopened menu rules (not available in portable Windhawk, which falls back to live tree inspection and a glass/acrylic approximation). Automatic text/icon contrast or a fixed text color keeps labels readable; see [Automatic Text and Icon Contrast](#automatic-text-and-icon-contrast).
+- **No Simulated Keystrokes**: A low-level keyboard hook (`WH_KEYBOARD_LL`) is active while Start, SearchHost, or the search window is in the foreground to capture opening text and context-menu typing. Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
 - **Accidental Open Prevention**: Enter only triggers actions when an item is selected in the active panel, preventing unintended opening of files.
 
 ---
@@ -168,7 +168,7 @@ The preview reads the indexed size from Everything. Without this option, the fol
 
 ## Keyboard Shortcuts and Navigation
 
-To add another shortcut, open **Settings → Apps & Search**, turn on **Enable Alternative Shortcut**, and select **Shortcut Modifiers** and **Shortcut Key**. It defaults to **Alt+Space**, disabled. Combine Ctrl, Alt, Shift, and Windows in any combination, or select None; a key without modifiers is reserved even while typing in other apps.
+To add another shortcut, open **Settings → Apps & Search**, turn on **Enable Alternative Shortcut**, and select **Shortcut Modifiers** and **Shortcut Key**. It defaults to **Alt+Space**, disabled. Combine Ctrl, Alt, Shift, and Windows in any combination, or select None for function, media, browser, or special keys. Unmodified typing keys are refused so normal typing cannot be blocked.
 
 The key dropdown includes letters, digits, function, navigation, numpad, punctuation/OEM, browser, and media keys. F12 is reserved by Windows, and Fn/hardware-only keys cannot be registered. Punctuation labels follow a US keyboard layout. Some combinations belong to Windows or other apps; choose another if yours is unavailable. Registration failures appear in the mod log. Changes apply immediately, and Win+S remains available.
 
@@ -301,7 +301,7 @@ Ordinary hidden custom commands use a process created without a console. Visible
 - **Everything is reported as not running:** start the Everything application and leave it running in the tray. Its service alone does not provide the search IPC window. Everything 1.4 and 1.5 alpha/beta, including named instances, are supported.
 - **A preview shows only an icon:** enable File Preview. Common image formats have a built-in decoding fallback; specialist formats may require a thumbnail provider, and videos may require a compatible Windows codec. Unavailable or unreadable content falls back to its icon and available properties.
 - **Folder sizes are missing:** enable Everything's **Index folder size** option; see [Folder Sizes in Preview](#folder-sizes-in-preview). The mod does not recursively scan folders to calculate sizes.
-- **Start Menu Styler appearance is not copied yet:** open Start so its layout and styling can be measured. Supported solid, acrylic, gradient, and recognized glass definitions are copied; arbitrary Styler effects are not guaranteed to match.
+- **Start Menu Styler appearance is not copied yet:** open Start so its layout and live visual tree can be measured (and open a context menu in Start if using portable Windhawk so its live menu presenter can be captured). Reading `WindhawkBlur` parameters and unopened menu rules from Windhawk's registry is best-effort and does not work with portable Windhawk.
 - **A custom command does not start:** choose the shell that understands the command. PowerShell 7 and custom shells must already be installed. Hide Terminal hides the shell console; it does not shorten the command's lifetime or hide windows opened by the command.
 
 Tested on **Windows 11 25H2 and 26H2, x86-64**. Other Windows versions and builds, including Insider builds, have not been verified. For a reproducible problem, include the full Windows build, mod version, Everything version and instance name, other Start/search mods, and steps to reproduce it.

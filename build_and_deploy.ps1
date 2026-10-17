@@ -20,13 +20,15 @@ $args = @(
     "-DNTDDI_VERSION=0x0A000008",
     "-D__USE_MINGW_ANSI_STDIO=0",
     "-DWH_MOD",
+    '-DWH_MOD_ID=L\"local@start-everything\"',
+    '-DWH_MOD_VERSION=L\"2.0\"',
     "-include", "windhawk_api.h",
     "-I", "C:\Program Files\Windhawk\Compiler\include",
     "-L", "C:\Program Files\Windhawk\Engine\1.7.3\64",
     "-Wl,--export-all-symbols",
     "-o", $outPath,
     "-x", "c++", (Join-Path $PSScriptRoot "start-everything.wh.cpp"),
-    "-lwindhawk", "-lole32", "-loleaut32", "-lruntimeobject", "-luuid", "-lshell32", "-lshlwapi", "-lcomctl32", "-ldwmapi", "-luser32", "-liphlpapi", "-lgdi32"
+    "-lwindhawk", "-ld2d1", "-lole32", "-loleaut32", "-lruntimeobject", "-luuid", "-lshell32", "-lshlwapi", "-lcomctl32", "-ldwmapi", "-luser32", "-liphlpapi", "-lgdi32"
 )
 
 & $cxx @args
