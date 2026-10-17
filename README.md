@@ -4,32 +4,52 @@
 [![Everything](https://img.shields.io/badge/voidtools-Everything%20v1.4%20%7C%20v1.5-orange.svg)](https://www.voidtools.com/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
 
-A native replacement for Windows 11 Start Menu search, powered by voidtools Everything. Type in the Start Menu to search files, apps, and settings instantly. Windows Search stays out of the way: its window is never shown, and it cannot start the Edge WebView2 process behind its Bing-backed search panel. Win+S and the taskbar search icon open this search too.
+A native replacement for Windows 11 search, powered by voidtools Everything. Press Win+S, click the taskbar search icon, or start typing in Start to search files, apps, and settings in a separate window styled after your Start menu. Windows Search stays out of the way: its window is never shown, and it cannot start the Edge WebView2 process behind its Bing-backed search panel.
 
-![Everything & Power Tools in the Start Menu](screenshot.png)
+Version **2.0** moves search into its own Windows 11 window while keeping Start available as usual.
+
+![Everything & Power Tools in the Start Menu](img.png)
+
+*Version 2.0: the separate search window with a folder preview.*
 
 ---
+
+## Version 2.0 Changes
+
+- Search runs in its own Windows 11 window, opened directly with Win+S, the taskbar search icon, an optional custom shortcut, or by typing in Start. Start itself still opens normally.
+- Copies Start's measured size, alignment, background, rounded corners, and supported Start Menu Styler appearance. Root context menus and submenus receive their copied style before appearing.
+- Adds app and custom-command suggestions for an empty query, shared favorite learning, configurable menu width and height, and settings organized into sections.
+- Adds named custom commands with CMD, Windows PowerShell, PowerShell 7, or a custom shell; optional hidden terminals; and emoji, Windows glyph, image, icon, or executable icons.
+- Adds automatic text and monochrome-icon contrast across the search window, with a fixed-color override. Background sampling pauses during motion and scrolling; unchanged samples reuse the cached color map.
+- Improves image previews with a built-in Windows decoding fallback. With a bottom taskbar, preview cards grow down while they fit search, then align at its bottom and grow upward when taller. Top and side taskbars keep previews top-aligned and growing downward. Crossing that height and changing selections mid-animation remain smooth.
+- Keeps search input and selection when a context menu closes. Typing or Backspace closes the menu and continues the query; Escape closes the menu before clearing search.
+- Defers search UI creation until first use, buffers opening text, and restores native and text-box focus after input handoffs.
+- Supports top and side taskbars, with animations confined to the selected monitor. Right-side taskbars place the preview on the left.
 
 ## Highlights and Key Features
 
 - **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
 - **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, and Windows Settings URIs (`ms-settings:`), with sharp shell icons, made at the exact pixel size of your display.
-- **Learns Your Favorites**: Apps you open from here more often move up among results that match equally well. A clearly better match always stays on top. Can be turned off in the settings, which also forgets what was learned.
-- **On-Demand Animated Palette**: The Start Menu stays completely clean and uncluttered when idle. The search palette slides in with a short ease-out animation the moment you type or click the search box, and collapses when emptied or on Escape.
+- **Learns Your Favorites**: Apps and custom commands you open from here more often move up among results that match equally well. A clearly better match always stays on top. Can be turned off in the settings, which also forgets what was learned.
+- **Separate Animated Search Window**: Search follows Start's size, taskbar alignment, colors, and rounded corners, with opening and closing animations that follow the taskbar edge (bottom, top, left, or right) and respect Windows' animation setting. It stays out of the taskbar and Alt+Tab. Typing in Start closes Start and carries the opening text into search. The search bar uses Windows' own search icon.
 - **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
-- **Win+S and the Search Icon**: Win+S and the taskbar search icon open the Start Menu with this search instead of the Windows search panel.
+- **Search Entry Points**: Open search directly with Win+S, the taskbar search icon, Start’s search bar, or an optional custom shortcut. Pressing Win or clicking Start opens Start normally; begin typing to switch into search.
+- **Suggested Apps**: An empty search shows apps and custom commands together, ordered by learned usage when enabled and alphabetically when learning is off. Escape clears the query to suggestions; press it again to close search.
+- **Custom Commands**: Add named commands to Apps, choose CMD, Windows PowerShell, PowerShell 7, or a custom shell, and optionally hide the terminal. Icons accept emoji, pasted Windows icon glyphs, Unicode codes, and local image, icon, or app paths. Commands also appear in empty-search suggestions.
+- **Optional Files Panel**: Hide the Files panel and pause Everything file queries. With automatic sizing, search becomes half as wide. Apps, settings, custom commands, and utilities remain available.
+- **Custom Menu Size**: Set your own menu width and height, or turn the toggle off to follow Start's size. Dimensions follow Windows display scaling and stay within the screen's available area.
 - **Inline Calculator**: Type a sum (e.g. `100 * 5`, `sqrt(144)`, `15% of 200`, `2^10`) and the result shows above the apps; large and small results show in scientific notation too (`= 99000`, `= 9.9e4`). Press Enter to copy it.
 - **Unit Converter**: Type `100 km` to see it in the usual units of its kind, all on one line first, or `100 km to mi` (also `in`, `->`, `=`) for just one; `255 hex` or `0xFF` for other bases. It knows length, mass, temperature, speed, area, volume, data, data rate, time, pressure, energy, power, angle and frequency, with `.` or `,` as the decimal point, and each kind has its color. A number alone, or one in a name (`2024 report`, `3d`), is left to the search. Add units it does not know in the settings, and have them convert back too (Reciprocal).
 - **Network Interface Inspector**: Type `/ip` to display all active Wi-Fi, Ethernet, and VPN network interfaces with their IP addresses, subnet masks, gateways, and hardware descriptions. Press Enter to copy the IP.
-- **Full Right-Click Context Menu**: Right-click any file, folder, or application to Open, Run as Administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy (files), Copy path, Open file location, or Uninstall (apps).
+- **Full Right-Click Context Menu**: Right-click any file, folder, or application to Open, Run as Administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy (files), Copy name (files/folders), Copy path, Open file location, or Uninstall (apps). Escape closes the menu; typing closes it and continues the query.
 - **Native Properties Dialogs**: Properties opens through `explorer.exe`, the same dialog as in File Explorer.
-- **File Preview**: The selected file gets a preview card beside the Start Menu: a large thumbnail (the one File Explorer shows, so pictures, a frame of a video and documents; PDFs show their first page, drawn by Windows' own PDF renderer) with its size, date and, for pictures and videos, dimensions and length. Videos and animated GIF and WebP images play in it, muted, and a PDF turns through its first pages. SVG images are drawn by Windows' own renderer. A file with no picture shows the start of its text instead: a text or code file its first lines, and a Word, Excel, PowerPoint, RTF or OpenDocument file its first paragraphs, read by Windows' own document readers (no Office needed), or Office's when it is installed. These readers run inside Start, as File Explorer runs them in its preview pane. Below it, the details: type, size, dates, and what the kind of file has of its own (dimensions, length, artist and album, camera, a program's description and version, a document's title and author). A folder shows how many items it holds and, when Everything keeps folder sizes (its "Index folder size" option), its size. A click on the path copies it.
-- **Drag and Drop**: Drag a file or folder from the results into File Explorer, the desktop or another app (Photoshop, a code editor, a chat) as you would from File Explorer. It is always a copy, never a move. Start closes once it has landed; Escape, or letting go over Start, cancels.
-- **Uninstall**: Right-click an app and choose Uninstall. After a confirmation that names what goes, a Store app is removed as Start removes it, and a program runs its own uninstaller, the one Installed apps in Settings runs. Apps that are part of Windows offer none. A Store app is removed in the background, with no progress bar: it is gone from the list after a few seconds.
+- **File Preview**: Images, muted media, PDF pages, SVGs, text/document excerpts, and file properties beside search. The card adapts its alignment and resize direction to the search window’s height. See [File Preview](#file-preview) for formats, copying, and folder sizes.
+- **Drag and Drop**: Drag a file or folder into File Explorer, the desktop, or another app. It is always a copy, never a move. Previews stay hidden during the drag. A successful drop closes search; Escape cancels.
+- **Uninstall**: Right-click an app and choose Uninstall. After a confirmation that names what goes, a Store app is removed as Start removes it, and a program runs its own uninstaller, the one Installed apps in Settings runs. Protected Windows components offer no uninstall action. A Store app is removed in the background, with no progress bar: it is gone from the list after a few seconds.
 - **Opens in Front**: Programs are started by Explorer, the way the stock Start menu starts them, so they come to the front even when they take a while to start or you move the mouse meanwhile.
 - **Explicit Web Search**: Trigger web searches on demand using the `?` prefix (e.g. `?query`). Includes customizable keyword shortcuts such as `?yt` (YouTube), `?gh` (GitHub), `?w` (Wikipedia), and `?r` (Reddit).
-- **Start Menu Styler Compatibility**: Automatically adopts background styles (Tinted Glass, Acrylic, custom theme colors) in real time without needing to restart the mod.
-- **No Input Injection**: Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
+- **Start Menu Styler Compatibility**: Copies supported Start backgrounds, colors, rounded corners, and menu styling before menus appear. Automatic text/icon contrast or a fixed text color keeps labels readable; see [Automatic Text and Icon Contrast](#automatic-text-and-icon-contrast). Arbitrary custom Styler effects may not be reproduced exactly.
+- **No Simulated Keystrokes**: Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
 - **Accidental Open Prevention**: Enter only triggers actions when an item is selected in the active panel, preventing unintended opening of files.
 
 ---
@@ -38,54 +58,97 @@ A native replacement for Windows 11 Start Menu search, powered by voidtools Ever
 
 ```mermaid
 graph TD
-    subgraph Explorer_Process ["explorer.exe (Desktop Shell)"]
-        T["Taskbar / Start Button / Win+S / Search Icon"]
-        GUARD["Search Guard (Search shown without Start -> SC_TASKLIST)"]
-        PROP["Explorer Helper Host (StartEverything_ExplorerHost)"]
-        SHD["Desktop IShellDispatch2 (ShellExecute)"]
-    end
-
-    subgraph Start_Menu ["StartMenuExperienceHost.exe (Start Menu UI)"]
-        SM["Start Menu Visual Tree"]
-        TRIG["WindhawkSearchTrigger (Click Target)"]
-        PAL["WindhawkEverythingResults (On-Demand Palette)"]
-        BOX["WindhawkStartSearchBox (Fluent TextBox)"]
-        KL["Win32 Key Listener (WH_GETMESSAGE + CoreWindow)"]
-        APPS["Apps & Settings Matcher (Shell:AppsFolder + Settings DB)"]
-        TOOLS["Tools & Utilities (Calc, Unit Conv, Network Interfaces)"]
-    end
-
-    subgraph Search_Host ["SearchHost.exe (Kept Invisible)"]
-        WV_HOOK["CreateProcessW Hook: Blocks WebView2 & Indexer"]
-        HIDE["CoreWindow at Zero Alpha (Never Drawn)"]
-        GRANT["Foreground Grant to Start (on Request)"]
-    end
-
-    subgraph Everything_Engine ["Everything Engine"]
-        EV["Everything.exe / Everything64.exe (Win32 IPC Window)"]
-    end
-
-    T -->|"Win Key / Open"| SM
-    KL -->|"Any Keystroke"| PAL
-    TRIG -->|"Click"| PAL
-    PAL --> BOX
-    BOX -->|"Query Text"| APPS
-    BOX -->|"Sums, units, /ip"| TOOLS
-    BOX -->|"WM_COPYDATA IPC"| EV
-    EV -->|"File Results"| PAL
-    APPS -->|"App Hits"| PAL
-    TOOLS -->|"Utility Cards"| PAL
-
-    GUARD -->|"Opens Start"| SM
-    SM -->|"Asks for Foreground"| GRANT
-    PAL -->|"Properties (WM_COPYDATA)"| PROP
-    PROP -->|"SHObjectProperties / ShellExecuteEx"| DESK["Native Properties Sheet"]
-    PAL -->|"Open: foreground to the helper host"| PROP
-    PAL -->|"Open: ShellExecute in Explorer"| SHD
-    SHD -->|"Started by Explorer"| PROG["Opened Program (comes to the front)"]
-
-    WV_HOOK -.->|"Denied"| WV["msedgewebview2.exe (BLOCKED)"]
+    INPUT["Win+S / Search icon / Start search bar / Typing in Start"]
+    START["StartMenuExperienceHost.exe: appearance and input handoff"]
+    SEARCH["explorer.exe: independent XAML search window"]
+    PROVIDERS["Apps, settings, custom commands, and utilities"]
+    EV["Everything: file and folder index"]
+    PREVIEW["Preview worker: thumbnails, text, media, and properties"]
+    SHELL["Explorer shell actions: launch, properties, drag, uninstall"]
+    HOST["SearchHost.exe: native search window kept hidden"]
+    INPUT --> SEARCH
+    START -->|"Measured layout, theme, opening text"| SEARCH
+    HOST -->|"Search activation"| SEARCH
+    SEARCH --> PROVIDERS
+    SEARCH <-->|"Win32 IPC"| EV
+    SEARCH --> PREVIEW
+    SEARCH --> SHELL
 ```
+
+---
+
+## Custom Commands
+
+In Windhawk, open the mod's **Settings → Custom Commands** and add an entry:
+
+- **Name**: Display name and search term.
+- **Icon**: Paste an emoji or a Windows icon glyph, enter a Unicode code such as `E713` (Settings) or `E7E8` (Power), or provide a full path to an image, `.ico`, or executable. `U+E713`, `0xE713`, `\uE713`, and `&#xE713;` also work. Environment variables in paths are expanded. Leave blank for the terminal icon.
+- **Shell**: Choose **Command Prompt (CMD)**, **Windows PowerShell**, **PowerShell 7**, or **Custom shell**. Existing commands default to CMD. PowerShell 7 must be installed separately; it is found in its standard installation folder or through PATH.
+- **Shell Executable**: For Custom shell, enter its full executable path or a name available in PATH, such as `nu.exe` or `wsl.exe`. Environment variables such as `%ProgramFiles%` are supported.
+- **Shell Arguments**: For Custom shell, put `{command}` once as a separate argument where the shell expects the command. The mod quotes it as one Windows argument, preserving quotes, spaces, Unicode and operators inside your code. Do not add quotes around `{command}`. Environment variables in this arguments template are expanded before inserting the command.
+- **Hide Terminal**: Run without showing the shell console (default off). Apps opened by the command can still show their own windows, and Run as administrator can still display Windows' permission prompt.
+- **Command**: Enter the command for the selected shell. The mod does not guess the shell from the command text. Blank names or commands are ignored. If the selected shell is missing or the Custom shell arguments are invalid, search stays open and shows the reason.
+
+Commands appear alongside installed apps in search results and empty-search suggestions, within **Max App Results**. They share the favorite system: frequently launched entries move up, and equal-use suggestions sort alphabetically. Turning off **Learn Favorite Apps** stops learning and clears history for both apps and commands. Right-click for **Run**, **Run as administrator**, or **Copy command**. Settings changes apply without reopening search. Up to 100 entries are supported.
+
+For example, name a CMD command `Downloads`, use `📂` as its icon, and set its command to `explorer.exe "%USERPROFILE%\Downloads"`. Browse Microsoft's [Segoe Fluent Icons list](https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font) for Windows glyphs and their codes.
+
+Custom shell examples (the shell must already be installed):
+
+| Shell | Shell Executable | Shell Arguments |
+| :--- | :--- | :--- |
+| Git Bash | `%ProgramFiles%\Git\bin\bash.exe` | `-c {command}` |
+| Nushell | `nu.exe` | `-c {command}` |
+| Bash in WSL | `wsl.exe` | `--exec bash -lc {command}` |
+
+Use a full executable path if it is installed somewhere else. WSL requires an installed Linux distribution. PowerShell 7 installation options are described in [Microsoft’s documentation](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-windows).
+
+## File Preview
+
+Enable **Settings → Files & Preview → File Preview** to show a card beside the selected file or folder. The card includes its name, type, size, dates, and relevant media or document properties.
+
+With a **bottom taskbar**, the preview uses the available screen space independently of the search window's height:
+
+- **Preview fits inside search's height:** align at the top and resize downward.
+- **Preview is taller than search:** align its bottom with search and resize upward, including above the search window.
+- **Preview crosses search's height:** switch alignment continuously during the same resize animation, without growing down and jumping up afterward. Rapid selection changes continue from the current size.
+
+The card stays within the monitor's usable area where its height permits. If upward growth reaches the screen's top edge, it uses the available space below.
+
+With a **top, left, or right taskbar**, the preview always aligns with the top of search and resizes downward. A **right taskbar** places the preview on the **left** of search.
+
+| Content | Preview behavior |
+| :--- | :--- |
+| **PNG, JPEG, BMP, GIF, TIFF** | Shell thumbnails, with Windows' built-in image decoder as a fallback. IrfanView or another image viewer is not required. |
+| **SVG** | Rendered using Windows' SVG support. |
+| **Video, animated GIF and WebP** | Muted looping playback when **Play Videos and Animations** is enabled. Video format support depends on the codecs available in Windows. |
+| **PDF** | Rendered with Windows' PDF engine, without a separate PDF app. With animation enabled, cycle through up to the first ten pages, one per second. |
+| **Text and code** | The beginning of the file, with selectable and copyable text. |
+| **Word, Excel, PowerPoint, RTF and OpenDocument** | A text excerpt when a supported Windows or Office document filter is available. Text is extracted without document page layout. |
+| **Folders** | A folder icon, item counts, and the indexed folder size when enabled in Everything. |
+| **PSD and other specialist formats** | A shell thumbnail when a suitable thumbnail provider is installed; otherwise a file icon and available details. Installing an app does not necessarily install a thumbnail provider. |
+
+Click the name, an individual detail value, or the full path to copy it. Copy targets follow the text area, and copying keeps the displayed path unchanged. Select and copy text directly from text/document excerpts. Previews stay hidden throughout drag and drop.
+
+Turn off **Play Videos and Animations** to keep previews still, or turn off **File Preview** to hide the card. Hiding the Files panel also hides its previews and stops the mod's Everything file queries; the Everything application itself keeps running.
+
+## Automatic Text and Icon Contrast
+
+Leave **Settings → Appearance → Text Color** set to **auto** to adapt text and monochrome interface icons to their backgrounds. App and file icons keep their original colors. Enter a color such as **#202020** or **#FFFFFF** to use one fixed text color instead. Windows high contrast takes precedence.
+
+One shared background map covers the search bar, both result panels, headings, and footer. Labels use strong local light or dark tones, and subtitles and hints stay opaque for readability. The map stays aligned while either panel scrolls and is reused as results change. Separate preview and context-menu popups adapt to their own backgrounds.
+
+Background samples refresh up to four times per second while stationary and pause during opening, closing, scrolling, and drag and drop. Unchanged samples reuse the existing map. The menu continues to follow supported Start Menu Styler backgrounds; arbitrary custom effects may not be reproduced exactly.
+
+## Folder Sizes in Preview
+
+To show folder sizes in previews, enable **Index folder size** in Everything:
+
+1. Open **Everything → Tools → Options → Indexes**.
+2. Check **Index folder size**, then click **OK**.
+3. Let Everything finish updating its index, then select a folder in search with **File Preview** enabled.
+
+The preview reads the indexed size from Everything. Without this option, the folder preview can show an item count but no indexed folder size. Sizes reflect what Everything indexes, so excluded files are not included. See the [Everything folder-size documentation](https://www.voidtools.com/en-us/support/everything/indexes/).
 
 ---
 
@@ -105,18 +168,25 @@ graph TD
 
 ## Keyboard Shortcuts and Navigation
 
+To add another shortcut, open **Settings → Apps & Search**, turn on **Enable Alternative Shortcut**, and select **Shortcut Modifiers** and **Shortcut Key**. It defaults to **Alt+Space**, disabled. Combine Ctrl, Alt, Shift, and Windows in any combination, or select None; a key without modifiers is reserved even while typing in other apps.
+
+The key dropdown includes letters, digits, function, navigation, numpad, punctuation/OEM, browser, and media keys. F12 is reserved by Windows, and Fn/hardware-only keys cannot be registered. Punctuation labels follow a US keyboard layout. Some combinations belong to Windows or other apps; choose another if yours is unavailable. Registration failures appear in the mod log. Changes apply immediately, and Win+S remains available.
+
 | Shortcut / Input | Action |
 | :--- | :--- |
-| **Type any key** | Automatically reveals the search palette, focuses the search box, and queries apps and files |
-| **Click Search Area** | Clicks header trigger area to reveal search palette and focus search box |
+| **Win+S / Taskbar search icon** | Open the search window directly |
+| **Alternative shortcut (optional)** | Open and focus search using your chosen modifier and key combination |
+| **Type in Start** | Close Start and carry the opening text into search |
+| **Click Start's search bar** | Open and focus the search window |
 | **Up / Down Arrow Keys** | Navigate selection through applications, utility cards, and files |
 | **Tab / Shift + Tab** | Move to the next / previous result, through the apps and on into the files |
 | **Left / Right Arrow Keys** | Switch between the Apps and Files columns (Right only with the cursor at the end of the query, so the arrows still move the cursor while you edit) |
 | **Enter** | Launch selected application, copy calculation/conversion/IP result, or open item. Pressed before the results for what you typed are in, it opens the first one as soon as they arrive |
 | **Ctrl + Enter** | Run selected application or file as Administrator (triggers UAC) |
 | **Shift + Enter** | Open the selected result's context menu (same as right-click); navigate it with the arrow keys and Enter |
-| **Escape** | Clear search text and smoothly collapse search palette back to pinned apps |
-| **Right-Click** | Open context menu (Open, Run as administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy, Copy path, Open file location) |
+| **Escape** | Close an open context menu first; otherwise clear the query to suggestions, or close search when already empty |
+| **Type while a context menu is open** | Close the menu and continue editing the query |
+| **Right-Click** | Open the result's context menu |
 
 ---
 
@@ -131,114 +201,116 @@ When right-clicking any file, folder, or application:
   - Right-click launches elevated as Administrator in that folder.
 - **Properties**: Displays the native Windows properties dialog sheet for the file, folder, or application via the Explorer Shell Relay host.
 - **Open file location**: Opens the parent folder in File Explorer and selects the target item.
-- **Copy path**: Copies the absolute file path as plain text (`CF_UNICODETEXT`). Does not close the Start Menu.
-- **Create desktop shortcut**: Instantly creates a `.lnk` shortcut on the user's Desktop for files, folders, Win32 apps, or UWP packages. Existing shortcuts are never overwritten. Does not close the Start Menu.
-- **Cut**: *(Files panel)* Places the file on the Windows clipboard using shell `CF_HDROP` with `DROPEFFECT_MOVE`. Pasting in any File Explorer folder or Desktop moves the file. Does not close the Start Menu.
-- **Copy**: *(Files panel)* Places the file on the Windows clipboard using shell `CF_HDROP` with `DROPEFFECT_COPY`. Pasting in any File Explorer folder or Desktop duplicates the file. Does not close the Start Menu.
-- **Uninstall**: *(Apps panel)* After a confirmation that names what goes, removes a Store app for your account, or runs a program's own uninstaller, the one Settings > Installed apps runs. Not offered for apps that are part of Windows or programs that registered no uninstaller.
+- **Copy name**: *(Files and folders)* Copies the name, including the extension for files.
+- **Copy path**: Copies the absolute file path as plain text. Keeps search open.
+- **Create desktop shortcut**: Creates a `.lnk` shortcut on the Desktop for files, folders, Win32 apps, or Store apps. Existing shortcuts are never overwritten. Keeps search open.
+- **Cut**: *(Files panel)* Places the item on the clipboard for a move when pasted into File Explorer or the desktop. Keeps search open.
+- **Copy**: *(Files panel)* Places the item on the clipboard for a copy when pasted into File Explorer or the desktop. Keeps search open.
+- **Uninstall**: *(Apps panel)* After a confirmation that names what goes, removes a Store app for your account, or runs a program's own uninstaller, the one Settings > Installed apps runs. Not offered for protected Windows components or programs that registered no uninstaller.
 
 > [!NOTE]
-> **Pinning to Taskbar or Start Menu**:
-> In modern Windows 11, Microsoft has strictly restricted programmatic pinning APIs (`Pin to Taskbar` / `Pin to Start`) to internal Windows system processes; third-party software cannot invoke these verbs directly.
-> If you wish to pin an item from search results to your Taskbar or Start Menu:
-> 1. Right-click the item and select **Create desktop shortcut**.
-> 2. Go to your Desktop, right-click the newly created shortcut, and select **Pin to Taskbar** or **Pin to Start**.
+> Pinning is not provided by this mod. Use Windows’ own context menu for an app or a desktop shortcut to pin it to Start or the taskbar.
 
 ---
 
 ## Mod Settings and Customization
 
+Version 2.0 organizes settings into collapsible sections. Windhawk does not transfer preferences from the old flat setting names to these sections automatically. Before upgrading from 1.x, save your settings or note your choices, then reapply them in the new sections after updating. This includes web search shortcuts and excluded path patterns. Custom commands and custom unit conversions keep their existing setting names.
+
 All settings can be customized in the Windhawk UI under **Everything & Power Tools in the Start Menu** > **Settings**:
 
-- **Max App Results**: Number of application matches displayed in the Apps column (default 6).
-- **Max File Results**: Number of file matches displayed in the Files column (default 12).
-- **Search Panel Margin**: Space in pixels between the search panel and the edges of the Start Menu (default 0, edge to edge; 14 gives the inset look of earlier versions).
+### Appearance
+
 - **Text Size (%)**: Size of the search panel's text, 80 to 150 percent of the usual (default 100).
-- **Search Debounce Delay (ms)**: Extra delay before searching, to let typing settle (default 0, instant). Rarely needed: while a search runs, new keystrokes already wait and only the latest text is searched.
-- **Learn Favorite Apps**: Rank the apps you open more often first among equally good matches (default on). Turning it off stops counting and forgets the apps learned so far; turn it on again to start over.
-- **File Preview**: Show the preview card beside the Start Menu for the selected file (default on).
-- **Play Videos and Animations**: In the preview, play videos and animated GIF and WebP images, muted and on a loop, and turn through a PDF's first pages, a second each (default on).
+- **Text Color**: Enter **auto** for one shared map across the main search window with local light/dark contrast and fully opaque labels, or an optional `#RRGGBB` color override. The map follows scrolling and refreshes up to four times per second while stationary. Applies to text and monochrome interface icons; Windows high contrast takes precedence.
 - **Show Keyboard Shortcuts Bar**: Toggle display of the bottom shortcuts hint bar.
+- **Use Custom Menu Size**: Override Start's dimensions with **Menu Width** and **Menu Height** (default off). Both default to 660 pixels at 100% display scaling. Width accepts 320–3840 and height 240–2160; larger values are limited to the available screen area. Changes apply immediately. The width is the actual menu width even when Files is hidden; the preview has its own space.
+
+### Apps & Search
+
+- **Max App Results**: Number of application matches displayed in the Apps column (default 6).
+- **Learn Favorite Apps**: Rank apps and custom commands you open more often first among equally good matches (default on). Turning it off stops counting and forgets learned usage for both; turn it on again to start over.
+- **Search Debounce Delay (ms)**: Extra delay before searching, to let typing settle (default 0, instant). Rarely needed: while a search runs, new keystrokes already wait and only the latest text is searched.
+- **Enable Alternative Shortcut**: Add a global shortcut for opening search (default off). Choose its modifier combination and keyboard key in the two dropdowns below. The default selection is Alt+Space; Win+S remains available. Changes apply immediately.
+
+### Files & Preview
+
+- **Hide Files Panel**: Remove the Files column and pause file queries (default off). Automatic sizing also halves the window's width; custom sizing keeps the width you chose. This does not stop the Everything application.
+- **Max File Results**: Number of file matches displayed in the Files column (default 12).
+- **File Preview**: Show the preview card beside search for the selected file or folder (default on). Click its name, detail values, or path to copy them; text excerpts also support selecting and copying text. With a bottom taskbar, shorter previews align at the top and taller previews align with search’s bottom, with a smooth transition. Top and side taskbars always keep previews top-aligned; a right taskbar puts the preview on the left.
+- **Play Videos and Animations**: In the preview, play videos and animated GIF and WebP images, muted and on a loop, and turn through a PDF's first pages, a second each (default on).
 - **Filter Noisy Paths**: Hide deep build caches, version control internals, and temporary directories from file results, unless nothing else matches.
 - **Excluded Path Patterns**: Paths containing any of these substrings (e.g. `\node_modules\`, `\.git\`, `\build\intermediates\`, `\windows\winsxs\`) are treated the same way, so build artifacts and internal system files do not clutter results.
+
+### Web Search
+
 - **Default Search Engine URL**: URL template for web search queries (default DuckDuckGo: `https://duckduckgo.com/?q={q}`).
 - **Web Search Shortcuts**: Define custom prefix keywords and target URLs (e.g. `yt` for YouTube, `gh` for GitHub, `w` for Wikipedia, `r` for Reddit).
-- **Custom Unit Conversions**: Units the converter does not know already, item by item:
-  - Formulas use `x` as the input number (e.g. `x / 16` for px to em).
-  - **Reciprocal**: also convert back, from the target unit - for a linear formula (`a * x + b`), as a unit conversion is.
-  - Delete individual conversions with the remove button on each item.
-  - Add new conversion formulas at any time.
+
+### Custom Commands
+
+Add up to 100 named commands with their own icon, shell, and terminal visibility. See [Custom Commands](#custom-commands).
+
+### Custom Unit Conversions
+
+Add units the converter does not know already. Formulas use `x` as the input number (e.g. `x / 16` for px to em). **Reciprocal** also converts back for a linear formula (`a * x + b`). Add, edit, or remove individual conversions at any time.
 
 ---
 
 ## How It Works Internally
 
-### 1. High-Performance Win32 IPC
-Rather than relying on COM search indexers or external broker daemons, the mod communicates directly with voidtools Everything's `EVERYTHING_IPC_WNDCLASS` hidden window via Win32 `WM_COPYDATA`, with results across millions of indexed files typically back in tens of milliseconds.
+### Search Window and Startup
 
-### 2. Windows Search, Kept Out of the Way
-Windows gives `SearchHost.exe` the foreground whenever Start or Search opens, so the mod works with it rather than against it. Nothing about how the shell shows, hides, or activates it is blocked:
-- `CreateProcessW`: Denies launching `msedgewebview2.exe` and `searchindexer.exe`, so its web view never starts.
-- Its window is drawn at zero alpha, so it never appears and clicks pass through it.
-- It grants the Start menu the foreground when the Start menu asks for it; the Start menu then takes it itself.
+Explorer hosts an independent Win32 window with a Windows XAML island. The native input relay starts after mod initialization. The XAML UI is created on the first search request, once the taskbar's own XAML island is ready; opening text is buffered until search can receive it. This avoids constructing the UI during early sign-in. Only the Explorer process that owns the taskbar creates search.
 
-In `explorer.exe`, a guard watches public window events: whenever Search is showing while Start is closed and you are still on one of the two (Win+S, the taskbar search icon, or a key typed a few milliseconds after the Windows key), it opens the Start menu with the documented `WM_SYSCOMMAND` / `SC_TASKLIST` command. No keystrokes are injected, and nothing runs in Explorer's own foreground path.
+Start publishes measured layout and supported appearance data through a validated IPC bridge. Search follows that layout and copies the background, search box, colors, corners, and menu presentation. Context-menu styles are prepared before root menus and submenus open. The native SearchHost window stays hidden, and its WebView2-backed search view is blocked.
 
-### 3. Explorer Shell Property Relay
-Properties dialogs are opened by `explorer.exe`, like in File Explorer. The mod creates a small STA host window there (`StartEverything_ExplorerHost`); when "Properties" is clicked in the Start Menu, the path is sent to it with `WM_COPYDATA`, checked (local and existing), and opened with `SHObjectProperties`.
+### Search Providers
 
-### 4. Programs Started by Explorer
-The Start menu's own `ShellExecute` is carried out for it by `sihost.exe`, so a program opened that way is not started by the foreground process, and Windows takes away its right to come to the front on the next keystroke or mouse move: a program slow to show its window opened behind the app you were in. Like the stock Start menu, the mod hands the foreground to Explorer (its `StartEverything_ExplorerHost` window) and has Explorer start the program, through the desktop's documented `IShellDispatch2::ShellExecute`. Apps are opened by their `shell:AppsFolder` name, so what their shortcut passes is kept. Run as administrator still goes straight to UAC.
+Apps and Windows Settings are matched locally. File queries go directly to Everything's Win32 IPC window, including named instances of Everything 1.5. The mod maintains no file index. Hiding the Files panel stops its file queries and file navigation. Custom commands are loaded from settings and run only when selected.
 
-### 5. File Preview
-The card beside the Start menu is a XAML popup. Start's window covers the whole screen but draws only inside its window region (the menu), so the card's rectangle is added to that region while it shows and taken out when it goes. A thread of its own fetches the shell thumbnail and properties, renders PDF pages with `Windows.Data.Pdf`, reads the start of text files itself and of documents through Windows' or Office's own `IFilter`s, and asks Everything for a folder's size and item count. SVGs are drawn by XAML's `SvgImageSource`; videos play in a muted `MediaPlayerElement`.
+### Preview and Shell Actions
 
-### 6. Drag and Drop Through Explorer
-XAML's own drag cannot run in Start's window, and a drag loop in Start's process never gets the mouse. So the drag runs in Explorer: Start hands the foreground to the mod's host window there, which runs the shell's `SHDoDragDrop` with the file's own shell data object, copy only. Windows keeps sending the mouse to Start while the button is held, so a small thread follows the pointer and feeds the drag loop its moves and the release.
+A preview worker fetches shell thumbnails and properties, renders PDFs with Windows.Data.Pdf, reads text excerpts, and queries Everything for folder facts. SVGs use XAML's SvgImageSource; videos use a muted MediaPlayerElement. Available document filters provide document text. Preview work stays off the search UI thread. Folder sizes come from Everything's index; the mod does not recursively scan a folder to calculate its size.
 
-### 7. Uninstall
-A program runs the uninstaller it registered under `Software\Microsoft\Windows\CurrentVersion\Uninstall`, found by its program file, install folder or name, and started through Explorer. A Store app is removed with `PackageManager.RemovePackageAsync` in Explorer, which checks the request first: Start must be open and in front, must confirm it is asking for that package, and the package must not be part of Windows.
+Applications launch through Explorer's desktop ShellExecute interface so they can come to the foreground. The Explorer helper also handles native property dialogs, shell drag-and-drop with copy-only effects, and validated Store package removal requests. Desktop programs use their registered uninstallers.
 
-### 8. Dynamic Theme and Acrylic Synchronization
-When using Windhawk's Windows 11 Start Menu Styler or custom system themes:
-- **Visual Tree Re-attachment**: If Start Menu Styler reloads control templates, the mod automatically detects visual tree changes, cleans dangling references, and re-attaches the search palette to the active container.
-- **Dynamic Background Sync**: `SyncOverlayBackground()` inspects `Border#AcrylicBorder` on every reveal, automatically syncing Tinted Glass, custom Acrylic, or themed brushes without requiring mod restarts.
+Ordinary hidden custom commands use a process created without a console. Visible commands use the selected shell through Explorer; explicit Run as administrator requests use Windows elevation.
 
 ---
 
 ## Requirements
 
-1. **Windows 11**: Supports versions `22H2+` (x86-64).
-2. **voidtools Everything**: Either **Everything 1.4** or **Everything 1.5** (alpha or beta, under any instance name) running in the background. Download from [https://www.voidtools.com/](https://www.voidtools.com/).
-3. **Windhawk**: Download and install [Windhawk](https://windhawk.net/) (version 1.4 or newer).
+1. **Windows 11 (x86-64)**: Tested on **25H2 and 26H2**. Other Windows versions and builds, including Insider builds, have not been verified.
+2. **voidtools Everything**: **Everything 1.4** or **Everything 1.5**, including alpha/beta and named instances. Keep the application running in the tray; the service alone is not enough. Download from [voidtools](https://www.voidtools.com/).
+3. **Windhawk**: Install [Windhawk](https://windhawk.net/) and load the mod.
 
 ---
 
 ## Taskbar Search
 
-The Windows key, the Start button, Win+S, and the taskbar search icon all open this search. The full taskbar search box is not supported, so set Search to **Search icon only** or **Hide**:
+**Win+S**, the **taskbar search icon**, and **Start’s search bar** open search directly. Pressing **Win** or clicking the **Start button** opens Start normally; begin typing there to switch into this search. The full taskbar search box is not supported, so set Search to **Search icon only** or **Hide**:
 
 1. Right-click an empty area on the Taskbar and select **Taskbar settings** (or navigate to **Settings** > **Personalization** > **Taskbar**).
 2. Under **Taskbar items**, set **Search** to **Search icon only** or **Hide**.
 
 ---
 
-## Building and Hot-Reloading
+## Troubleshooting and Compatibility
 
-To compile and hot-reload the mod into your active Windows session:
+- **Everything is reported as not running:** start the Everything application and leave it running in the tray. Its service alone does not provide the search IPC window. Everything 1.4 and 1.5 alpha/beta, including named instances, are supported.
+- **A preview shows only an icon:** enable File Preview. Common image formats have a built-in decoding fallback; specialist formats may require a thumbnail provider, and videos may require a compatible Windows codec. Unavailable or unreadable content falls back to its icon and available properties.
+- **Folder sizes are missing:** enable Everything's **Index folder size** option; see [Folder Sizes in Preview](#folder-sizes-in-preview). The mod does not recursively scan folders to calculate sizes.
+- **Start Menu Styler appearance is not copied yet:** open Start so its layout and styling can be measured. Supported solid, acrylic, gradient, and recognized glass definitions are copied; arbitrary Styler effects are not guaranteed to match.
+- **A custom command does not start:** choose the shell that understands the command. PowerShell 7 and custom shells must already be installed. Hide Terminal hides the shell console; it does not shorten the command's lifetime or hide windows opened by the command.
 
-1. Clone or copy this repository to your local drive (e.g. `D:\Work\start-search-everything`).
-2. Open PowerShell as Administrator and run the automated build script:
+Tested on **Windows 11 25H2 and 26H2, x86-64**. Other Windows versions and builds, including Insider builds, have not been verified. For a reproducible problem, include the full Windows build, mod version, Everything version and instance name, other Start/search mods, and steps to reproduce it.
 
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\build_and_deploy.ps1
-```
+## Building Version 2.0
 
-The script will:
-- Compile `start-everything.wh.cpp` via Clang (`-std=c++23`, `-O2`).
-- Register the binary DLL inside Windhawk's Engine directory (`C:\ProgramData\Windhawk\Engine\Mods\64\`).
-- Synchronize mod source and settings into Windhawk.
-- Recycle `StartMenuExperienceHost.exe` to inject the updated mod immediately.
+Open [start-everything.wh.cpp](start-everything.wh.cpp) in Windhawk’s mod editor and compile it. Its metadata declares the compiler libraries, x86-64 architecture, and three target processes: explorer.exe, StartMenuExperienceHost.exe, and SearchHost.exe. Update the existing local mod when testing successive builds.
+
+The older build_and_deploy.ps1 script targets the previous layout and rewrites local settings. Use Windhawk’s mod editor for version 2.0.
 
 ---
 
