@@ -21,7 +21,7 @@ Version **2.0** moves search into its own Windows 11 window while keeping Start 
 - Adds app and custom-command suggestions for an empty query, shared favorite learning, configurable menu width and height, and settings organized into sections.
 - Adds named custom commands with CMD, Windows PowerShell, PowerShell 7, or a custom shell; optional hidden terminals; and emoji, Windows glyph, image, icon, or executable icons.
 - Adds automatic text and monochrome-icon contrast across the search window, with a fixed-color override. Background sampling pauses during motion and scrolling; unchanged samples reuse the cached color map.
-- Isolates preview extraction and media decoding in a separate Windows worker process, with a built-in image-decoding fallback. With a bottom taskbar, preview cards grow down while they fit search, then align at its bottom and grow upward when taller. Top and side taskbars keep previews top-aligned and growing downward. Crossing that height and changing selections mid-animation remain smooth.
+- Fetches previews on a dedicated background thread, with built-in Windows image decoding, PDF rendering, and SVG rasterization. With a bottom taskbar, preview cards grow down while they fit search, then align at its bottom and grow upward when taller. Top and side taskbars keep previews top-aligned and growing downward. Crossing that height and changing selections mid-animation remain smooth.
 - Keeps search input and selection when a context menu closes. Typing or Backspace closes the menu and continues the query; Escape closes the menu before clearing search.
 - Defers search UI creation until first use, buffers opening text, waits for the editable IME context before replaying opening keys through Windows native input, and restores native and text-box focus after input handoffs.
 - Supports top and side taskbars, with animations confined to the selected monitor. Right-side taskbars place the preview on the left.
@@ -130,7 +130,7 @@ With a **top, left, or right taskbar**, the preview always aligns with the top o
 
 Click the name, an individual detail value, or the full path to copy it. Copy targets follow the text area, and copying keeps the displayed path unchanged. Select and copy text directly from text/document excerpts. Previews stay hidden throughout drag and drop.
 
-Preview files are processed in a separate, hidden Windows worker using the same mod DLL; no additional preview application is required. Explorer receives only decoded pixels, text, and details. A failed worker leaves the last thumbnail or a file icon, and the next preview request can start a new worker. The worker stops when the preview hides. Large animations are bounded to protect memory use.
+Preview extraction runs on a dedicated background thread. Videos use Windows’ native media presenter, muted and looping. No separate helper process or preview application is required. Animated-image and PDF-frame caches are bounded to protect memory use; hiding the preview stops playback and cancels pending page rendering.
 
 Turn off **Play Videos and Animations** to keep previews still, or turn off **File Preview** to hide the card. Hiding the Files panel also hides its previews and stops the mod's Everything file queries; the Everything application itself keeps running.
 
@@ -273,7 +273,7 @@ Apps and Windows Settings are matched locally. File queries go directly to Every
 
 ### Preview and Shell Actions
 
-A separate, hidden rundll32.exe worker loads the mod's existing DLL and performs shell thumbnail/property extraction, Windows image decoding, PDF rendering, SVG rasterization, document filtering, and muted video decoding. Explorer receives validated, size-limited pixels and text. Video frames are capped at 24 per second. The worker is reused while previews are in use, stops when the preview hides, and is terminated on cancellation, failure, or a stalled response. It also closes if Explorer exits or the mod unloads. No helper executable is installed. Folder sizes come from Everything's index; the mod does not recursively scan a folder to calculate its size.
+A dedicated background thread fetches shell thumbnails and properties, decodes images, renders PDFs and SVGs, and extracts text/document excerpts. These operations run inside Explorer, away from the search UI thread. Videos use a muted, looping Windows MediaPlayerElement directly, without copying each video frame through a pipe. Pending PDF rendering is canceled when selection changes or the preview hides. Folder sizes come from Everything's index; the mod does not recursively scan folders to calculate sizes.
 
 Applications launch through the shell from Explorer so they can come to the foreground. The Explorer helper also handles native property dialogs, shell drag-and-drop with copy-only effects, and validated Store package removal requests. Desktop programs use their registered uninstallers.
 
