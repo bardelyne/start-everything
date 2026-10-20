@@ -21,17 +21,17 @@ Version **2.0** moves search into its own Windows 11 window while keeping Start 
 - Adds app and custom-command suggestions for an empty query, shared favorite learning, configurable menu width and height, and settings organized into sections.
 - Adds named custom commands with CMD, Windows PowerShell, PowerShell 7, or a custom shell; optional hidden terminals; and emoji, Windows glyph, image, icon, or executable icons.
 - Adds automatic text and monochrome-icon contrast across the search window, with a fixed-color override. Background sampling pauses during motion and scrolling; unchanged samples reuse the cached color map.
-- Improves image previews with a built-in Windows decoding fallback. With a bottom taskbar, preview cards grow down while they fit search, then align at its bottom and grow upward when taller. Top and side taskbars keep previews top-aligned and growing downward. Crossing that height and changing selections mid-animation remain smooth.
+- Isolates preview extraction and media decoding in a separate Windows worker process, with a built-in image-decoding fallback. With a bottom taskbar, preview cards grow down while they fit search, then align at its bottom and grow upward when taller. Top and side taskbars keep previews top-aligned and growing downward. Crossing that height and changing selections mid-animation remain smooth.
 - Keeps search input and selection when a context menu closes. Typing or Backspace closes the menu and continues the query; Escape closes the menu before clearing search.
-- Defers search UI creation until first use, buffers opening text, and restores native and text-box focus after input handoffs.
+- Defers search UI creation until first use, buffers opening text, waits for the editable IME context before replaying opening keys through Windows native input, and restores native and text-box focus after input handoffs.
 - Supports top and side taskbars, with animations confined to the selected monitor. Right-side taskbars place the preview on the left.
 
 ## Highlights and Key Features
 
 - **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
-- **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, and Windows Settings URIs (`ms-settings:`), with sharp shell icons, made at the exact pixel size of your display.
+- **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, Windows Settings categories, and deeper Settings pages (`ms-settings:`), with sharp shell icons, made at the exact pixel size of your display. Obsolete shortcuts are excluded, and optional Windows tools and Control Panel pages are shown only when their destinations are installed and resolvable.
 - **Learns Your Favorites**: Apps and custom commands you open from here more often move up among results that match equally well. A clearly better match always stays on top. Can be turned off in the settings, which also forgets what was learned.
-- **Separate Animated Search Window**: Search follows Start's size, taskbar alignment, colors, and rounded corners, with opening and closing animations that follow the taskbar edge (bottom, top, left, or right) and respect Windows' animation setting. It stays out of the taskbar and Alt+Tab. Typing in Start closes Start and carries the opening text into search. The search bar uses Windows' own search icon.
+- **Separate Animated Search Window**: Search follows Start's size, taskbar alignment, colors, and rounded corners, with opening and closing animations that follow the taskbar edge (bottom, top, left, or right) and respect Windows' animation setting. It stays out of the taskbar and Alt+Tab. Typing in Start switches immediately without an opening animation and carries the opening text into search. The search bar uses Windows' own search icon.
 - **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
 - **Search Entry Points**: Open search directly with Win+S, the taskbar search icon, Start’s search bar, or an optional custom shortcut. Pressing Win or clicking Start opens Start normally; begin typing to switch into search.
 - **Suggested Apps**: An empty search shows apps and custom commands together, ordered by learned usage when enabled and alphabetically when learning is off. Escape clears the query to suggestions; press it again to close search.
@@ -48,8 +48,8 @@ Version **2.0** moves search into its own Windows 11 window while keeping Start 
 - **Uninstall**: Right-click an app and choose Uninstall. After a confirmation that names what goes, a Store app is removed as Start removes it, and a program runs its own uninstaller, the one Installed apps in Settings runs. Protected Windows components offer no uninstall action. A Store app is removed in the background, with no progress bar: it is gone from the list after a few seconds.
 - **Opens in Front**: Programs are started by Explorer, the way the stock Start menu starts them, so they come to the front even when they take a while to start or you move the mouse meanwhile.
 - **Explicit Web Search**: Trigger web searches on demand using the `?` prefix (e.g. `?query`). Includes customizable keyword shortcuts such as `?yt` (YouTube), `?gh` (GitHub), `?w` (Wikipedia), and `?r` (Reddit).
-- **Start Menu Styler Compatibility**: Reads Start's rendered `AcrylicBorder`, search box, headers, footer, and opened context menus from its live visual tree using public XAML properties, approximating custom composition blur brushes with a glass effect. Automatic text/icon contrast or a fixed text color keeps labels readable; see [Automatic Text and Icon Contrast](#automatic-text-and-icon-contrast).
-- **No Simulated Keystrokes**: A low-level keyboard hook (`WH_KEYBOARD_LL`) is active while Start, SearchHost, or the search window is in the foreground to capture opening text and context-menu typing. Focus is handled with standard foreground APIs only; the mod never attaches thread input or synthesizes keystrokes.
+- **Start Menu Styler Compatibility**: Reads Start's rendered `AcrylicBorder`, search box, headers, footer, and opened context menus from its live visual tree using public XAML properties. Supported custom glass brushes also copy their actual composition effect definitions, including tint alpha, blur, saturation, and luminosity, without theme presets. Unchanged materials reuse a bounded cache. Automatic text/icon contrast or a fixed text color keeps labels readable; see [Automatic Text and Icon Contrast](#automatic-text-and-icon-contrast).
+- **Keyboard Input**: Opening text and context-menu typing carry into search. Chinese, Japanese, and Korean opening keys use Windows' native input path once the search box is ready for IME composition. Focus uses standard foreground APIs without attaching thread input.
 - **Accidental Open Prevention**: Enter only triggers actions when an item is selected in the active panel, preventing unintended opening of files.
 
 ---
@@ -130,6 +130,8 @@ With a **top, left, or right taskbar**, the preview always aligns with the top o
 
 Click the name, an individual detail value, or the full path to copy it. Copy targets follow the text area, and copying keeps the displayed path unchanged. Select and copy text directly from text/document excerpts. Previews stay hidden throughout drag and drop.
 
+Preview files are processed in a separate, hidden Windows worker using the same mod DLL; no additional preview application is required. Explorer receives only decoded pixels, text, and details. A failed worker leaves the last thumbnail or a file icon, and the next preview request can start a new worker. The worker stops when the preview hides. Large animations are bounded to protect memory use.
+
 Turn off **Play Videos and Animations** to keep previews still, or turn off **File Preview** to hide the card. Hiding the Files panel also hides its previews and stops the mod's Everything file queries; the Everything application itself keeps running.
 
 ## Automatic Text and Icon Contrast
@@ -176,7 +178,7 @@ The key dropdown includes letters, digits, function, navigation, numpad, punctua
 | :--- | :--- |
 | **Win+S / Taskbar search icon** | Open the search window directly |
 | **Alternative shortcut (optional)** | Open and focus search using your chosen modifier and key combination |
-| **Type in Start** | Close Start and carry the opening text into search |
+| **Type in Start** | Switch immediately and carry the opening text into search |
 | **Click Start's search bar** | Open and focus the search window |
 | **Up / Down Arrow Keys** | Navigate selection through applications, utility cards, and files |
 | **Tab / Shift + Tab** | Move to the next / previous result, through the apps and on into the files |
@@ -271,9 +273,9 @@ Apps and Windows Settings are matched locally. File queries go directly to Every
 
 ### Preview and Shell Actions
 
-A preview worker fetches shell thumbnails and properties, renders PDFs with Windows.Data.Pdf, reads text excerpts, and queries Everything for folder facts. SVGs use XAML's SvgImageSource; videos use a muted MediaPlayerElement. Available document filters provide document text. Preview work stays off the search UI thread. Folder sizes come from Everything's index; the mod does not recursively scan a folder to calculate its size.
+A separate, hidden rundll32.exe worker loads the mod's existing DLL and performs shell thumbnail/property extraction, Windows image decoding, PDF rendering, SVG rasterization, document filtering, and muted video decoding. Explorer receives validated, size-limited pixels and text. Video frames are capped at 24 per second. The worker is reused while previews are in use, stops when the preview hides, and is terminated on cancellation, failure, or a stalled response. It also closes if Explorer exits or the mod unloads. No helper executable is installed. Folder sizes come from Everything's index; the mod does not recursively scan a folder to calculate its size.
 
-Applications launch through Explorer's desktop ShellExecute interface so they can come to the foreground. The Explorer helper also handles native property dialogs, shell drag-and-drop with copy-only effects, and validated Store package removal requests. Desktop programs use their registered uninstallers.
+Applications launch through the shell from Explorer so they can come to the foreground. The Explorer helper also handles native property dialogs, shell drag-and-drop with copy-only effects, and validated Store package removal requests. Desktop programs use their registered uninstallers.
 
 Ordinary hidden custom commands use a process created without a console. Visible commands use the selected shell through Explorer; explicit Run as administrator requests use Windows elevation.
 
@@ -301,7 +303,7 @@ Ordinary hidden custom commands use a process created without a console. Visible
 - **Everything is reported as not running:** start the Everything application and leave it running in the tray. Its service alone does not provide the search IPC window. Everything 1.4 and 1.5 alpha/beta, including named instances, are supported.
 - **A preview shows only an icon:** enable File Preview. Common image formats have a built-in decoding fallback; specialist formats may require a thumbnail provider, and videos may require a compatible Windows codec. Unavailable or unreadable content falls back to its icon and available properties.
 - **Folder sizes are missing:** enable Everything's **Index folder size** option; see [Folder Sizes in Preview](#folder-sizes-in-preview). The mod does not recursively scan folders to calculate sizes.
-- **Start Menu Styler appearance is not copied yet:** open Start so its layout and live visual tree can be measured (and open a context menu in Start once so its live menu presenter can be captured). Custom composition blur brushes are approximated with a glass effect using their public tint/fallback colors.
+- **Start Menu Styler appearance is not copied yet:** open Start so its layout and live visual tree can be measured (and open a context menu in Start once so its live menu presenter can be captured). Supported static glass effects are captured when Start creates them. Live image/visual sources, animated custom effects, and unsupported effects use an approximation; their appearance may differ.
 - **A custom command does not start:** choose the shell that understands the command. PowerShell 7 and custom shells must already be installed. Hide Terminal hides the shell console; it does not shorten the command's lifetime or hide windows opened by the command.
 
 Tested on **Windows 11 25H2 and 26H2, x86-64**. Other Windows versions and builds, including Insider builds, have not been verified. For a reproducible problem, include the full Windows build, mod version, Everything version and instance name, other Start/search mods, and steps to reproduce it.
