@@ -16,6 +16,7 @@ Version **2.0** moves search into its own Windows 11 window while keeping Start 
 
 ## Version 2.0 Changes
 
+- Discovers searchable Settings names and keywords from Windows' local database and navigation metadata, cached in memory. Keeps additional Windows tools and falls back to the built-in list if native data is unavailable.
 - Search runs in its own Windows 11 window, opened directly with Win+S, the taskbar search icon, an optional custom shortcut, or by typing in Start. Start itself still opens normally.
 - Copies Start's measured size, alignment, background, rounded corners, and supported Start Menu Styler appearance. Root context menus and submenus receive their copied style before appearing.
 - Adds app and custom-command suggestions for an empty query, shared favorite learning, configurable menu width and height, and settings organized into sections.
@@ -29,7 +30,7 @@ Version **2.0** moves search into its own Windows 11 window while keeping Start 
 ## Highlights and Key Features
 
 - **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
-- **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Control Panel applets, Windows Settings categories, and deeper Settings pages (`ms-settings:`), with sharp shell icons, made at the exact pixel size of your display. Obsolete shortcuts are excluded, and optional Windows tools and Control Panel pages are shown only when their destinations are installed and resolvable.
+- **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Windows Settings, Control Panel applets, and Windows tools. Settings names and keywords come from Windows' own local search database and navigation metadata, cached in memory and refreshed with the app index when the Windows catalog changes. Additional Windows tools stay available, and an audited built-in list is used if native data is missing or incompatible. No Windows Search indexing service or extra database software is required. Shell icons are rendered at your display's exact pixel size.
 - **Learns Your Favorites**: Apps and custom commands you open from here more often move up among results that match equally well. A clearly better match always stays on top. Can be turned off in the settings, which also forgets what was learned.
 - **Separate Animated Search Window**: Search follows Start's size, taskbar alignment, colors, and rounded corners, with opening and closing animations that follow the taskbar edge (bottom, top, left, or right) and respect Windows' animation setting. It stays out of the taskbar and Alt+Tab. Typing in Start switches immediately without an opening animation and carries the opening text into search. The search bar uses Windows' own search icon.
 - **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
