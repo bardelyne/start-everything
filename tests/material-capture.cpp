@@ -8,6 +8,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Effects.h>
 #include <winrt/Windows.UI.Composition.h>
+#include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
@@ -56,6 +57,30 @@ struct TestMaterialBrush : wuxm::XamlCompositionBrushBaseT<TestMaterialBrush> {
  void Attach(searchcomp::CompositionBrush const& value){CompositionBrush(value);}
  wf::IInspectable Inner()const{return this->m_inner;}
 };
+struct TestWarmMaterialBrush : wuxm::XamlCompositionBrushBaseT<TestWarmMaterialBrush> {
+ using Base=wuxm::XamlCompositionBrushBaseT<TestWarmMaterialBrush>;
+ searchcomp::Compositor compositor;
+ float radius=43.f;int connects=0,disconnects=0;bool unsupported=false,failDisconnect=false,failConnect=false,reenter=false,hideProtected=true;
+ int32_t __stdcall QueryInterface(winrt::guid const& id,void** out)noexcept{
+  if(hideProtected&&id==winrt::guid_of<wuxm::IXamlCompositionBrushBaseProtected>()){*out=nullptr;return E_NOINTERFACE;}
+  return Base::QueryInterface(id,out);
+ }
+ wf::IInspectable Inner()const{return this->m_inner;}
+ searchcomp::CompositionBrush Current()const{return CompositionBrush();}
+ void OnConnected(){
+  ++connects;
+  if(failConnect)throw winrt::hresult_error(E_FAIL);
+  if(reenter)CaptureSearchBrush(this->get_strong().as<wuxm::XamlCompositionBrushBase>());
+  if(CompositionBrush())return;
+  if(unsupported){CompositionBrush(compositor.CreateSurfaceBrush());return;}
+  auto effect=winrt::make_self<SearchEffect>(CLSID_D2D1GaussianBlur);
+  effect->properties={wf::PropertyValue::CreateSingle(radius),wf::PropertyValue::CreateUInt32(1),wf::PropertyValue::CreateUInt32(1)};
+  effect->sources={searchcomp::CompositionEffectSourceParameter(L"WarmBackdrop")};
+  auto factory=compositor.CreateEffectFactory(*effect);auto brush=factory.CreateBrush();
+  brush.SetSourceParameter(L"WarmBackdrop",compositor.CreateBackdropBrush());CompositionBrush(brush);
+ }
+ void OnDisconnected(){++disconnects;if(auto brush=CompositionBrush())brush.Close();CompositionBrush(nullptr);if(failDisconnect)throw winrt::hresult_error(E_FAIL);}
+};
 void Check(bool value,const char* name){++checks;if(!value)++failures;std::printf("%s %s\n",value?"PASS":"FAIL",name);}
 }
 int Run()try{
@@ -65,7 +90,7 @@ int Run()try{
   InitSearchMaterialCapture();
   Check(g_searchMaterialCapture,"cold initialization registers all material hooks");
   Check(std::all_of(g_searchMaterialModules.begin(),g_searchMaterialModules.end(),[](auto module){return module!=nullptr;}),"all hook-target libraries are held after discovery thread exits");
-  for(auto target:{reinterpret_cast<void*>(g_searchCreateFactory),reinterpret_cast<void*>(g_searchCreateFactoryWithProperties),reinterpret_cast<void*>(g_searchCreateEffectBrush),reinterpret_cast<void*>(g_searchCreateXamlBrush)}){
+  for(auto target:{reinterpret_cast<void*>(g_searchCreateFactory),reinterpret_cast<void*>(g_searchCreateFactoryWithProperties),reinterpret_cast<void*>(g_searchCreateEffectBrush),reinterpret_cast<void*>(g_searchCreateXamlBrush),reinterpret_cast<void*>(g_searchPutXamlComposition)}){
    MEMORY_BASIC_INFORMATION memory{};Check(VirtualQuery(target,&memory,sizeof(memory))&&memory.State==MEM_COMMIT&&(memory.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)),"pending hook points to loaded executable code before hook application");
   }
   StopSearchMaterialCapture();
@@ -186,6 +211,10 @@ int Run()try{
  brush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateSurfaceBrush());SearchBrushData unsupported;
  Check(!TryCaptureSearchCompositionBrush(brush,unsupported),"non-transferable surfaces fail safely instead of being misread as backdrops");
  auto manager=wux::Hosting::WindowsXamlManager::InitializeForCurrentThread();
+  auto setterProbe=winrt::make_self<TestMaterialBrush>();
+  auto setterAccess=setterProbe->Inner().as<wuxm::IXamlCompositionBrushBaseProtected>();
+  testHooks.Add(winrt::get_abi(setterAccess),7,reinterpret_cast<void*>(SearchPutXamlCompositionHook));
+  setterAccess=nullptr;setterProbe=nullptr;
  brush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());
  auto custom=winrt::make_self<TestMaterialBrush>();custom->Attach(brush);
  auto xaml=custom.as<wuxm::XamlCompositionBrushBase>();
@@ -262,6 +291,51 @@ int Run()try{
  auto recursive=winrt::make_self<SearchEffect>(CLSID_D2D1Composite);recursive->sources={*recursive};
  bool rejected=false;try{SearchEffectGraph cycle;CaptureSearchEffectNode(static_cast<searcheffect::IGraphicsEffectSource>(*recursive),cycle);}catch(...){rejected=true;}
  recursive->sources.clear();Check(rejected,"cyclic effect descriptions hit bounded recursion");
+
+ // Simulate a DLL unload/load with the same live XAML wrapper and compositor.
+ // Materials created or changed while disabled must be read from the brush's
+ // current lifecycle, rather than from any saved theme definition.
+ {
+  auto reset=[] {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();};
+  g_searchMaterialCapture=false;reset();
+  auto warm=winrt::make_self<TestWarmMaterialBrush>();warm->OnConnected();auto warmXaml=warm.as<wuxm::XamlCompositionBrushBase>();
+  Check(!warmXaml.try_as<wuxm::IXamlCompositionBrushBaseProtected>(),"warm aggregate hides its protected interface exactly like Styler");
+  Check(CaptureSearchBrush(warmXaml).kind==4&&warm->connects==1,"disabled capture does not refresh a host brush");
+  g_searchMaterialCapture=true;
+  for(int pass=0;pass<20;++pass){
+   g_searchMaterialCapture=false;reset();warm->OnDisconnected();warm->radius=43.f+pass;warm->OnConnected();
+   warm->hideProtected=pass%4<2;
+   // Also cover re-enabling while Start has disconnected the brush while hidden.
+   if(pass%2)warm->OnDisconnected();
+   const int connects=warm->connects,disconnects=warm->disconnects;g_searchMaterialCapture=true;
+   auto material=CaptureSearchBrush(warmXaml);
+   Check(material.kind==5&&material.graph.nodes[1].properties[0].values[0]==warm->radius,"warm enable captures the current exact graph after each off/on cycle");
+   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"warm refresh runs one balanced lifecycle pair");
+   for(int read=0;read<100;++read)CaptureSearchBrush(warmXaml);
+   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"repeated appearance reads never reconnect an already observed brush");
+  }
+  auto nativeWarm=warm->Current().as<searchcomp::CompositionEffectBrush>();
+  nativeWarm.SetSourceParameter(L"WarmBackdrop",warm->compositor.CreateColorBrush(winrt::Windows::UI::Color{101,29,31,37}));
+  auto updated=CaptureSearchBrush(warmXaml);
+  Check(updated.kind==5&&updated.graph.nodes[0].kind==3&&updated.graph.nodes[0].color==0x651D1F25,"warm owner reads current source changes through its observed native assignment");
+  nativeWarm=nullptr;warm->OnDisconnected();
+  {std::lock_guard lock(g_searchMaterialMutex);Check(!g_searchMaterialXaml.at(warmXaml.as<IUnknown>().get()).compositionObject,"disconnect clears the observed native pointer without retaining its brush");}
+  Check(CaptureSearchBrush(warmXaml).kind==5,"an explicitly disconnected warm owner keeps its current-load material");
+  g_searchMaterialCapture=false;reset();warm->OnConnected();warm->reenter=true;g_searchMaterialCapture=true;
+  Check(CaptureSearchBrush(warmXaml).kind==5,"a reentrant custom connect cannot recurse into another refresh");
+  warm->reenter=false;
+  for(int failure=0;failure<3;++failure){
+   g_searchMaterialCapture=false;reset();warm->OnDisconnected();warm->unsupported=failure==0;warm->OnConnected();
+   warm->failDisconnect=failure==1;warm->failConnect=failure==2;g_searchMaterialCapture=true;
+   const int connects=warm->connects,disconnects=warm->disconnects;
+   CaptureSearchBrush(warmXaml);
+   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"failed or unsupported refresh still attempts reconnection once");
+   for(int read=0;read<20;++read)CaptureSearchBrush(warmXaml);
+   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"failed or unsupported refresh never loops on appearance polling");
+   warm->failDisconnect=false;warm->failConnect=false;warm->unsupported=false;
+  }
+  warm->OnDisconnected();warm=nullptr;warmXaml=nullptr;
+ }
  brush=nullptr;factory=nullptr;copiedBrush=nullptr;copiedFactory=nullptr;
  std::thread stopOnEngineThread([]{winrt::init_apartment(winrt::apartment_type::multi_threaded);StopSearchMaterialCapture();winrt::uninit_apartment();});stopOnEngineThread.join();Check(g_searchMaterialFactories.empty()&&g_searchMaterialBrushes.empty()&&g_searchMaterialXaml.empty(),"engine-thread shutdown clears definitions without owning factory or brush references");
  std::printf("RESULT %d checks, %d failures; appearance packet %zu bytes\n",checks,failures,sizeof(SearchBrushData));
