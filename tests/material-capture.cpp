@@ -25,7 +25,6 @@
 #include <cstdio>
 #include <string>
 #include <cstring>
-#include <cwchar>
 #include <type_traits>
 namespace wf=winrt::Windows::Foundation;
 namespace wux=winrt::Windows::UI::Xaml;
@@ -36,16 +35,6 @@ static int checks=0,failures=0;
 #define Wh_Log(...) ((void)0)
 bool Wh_SetFunctionHook(void* target,void*,void** original){*original=target;return true;}
 namespace WindhawkUtils { template<class Prototype> bool SetFunctionHook(Prototype* target, Prototype* hook, Prototype** original) { return Wh_SetFunctionHook(reinterpret_cast<void*>(target),reinterpret_cast<void*>(hook),reinterpret_cast<void**>(original)); } }
-static std::unordered_map<std::wstring,std::vector<unsigned char>> g_storageByKey;
-static auto& g_storage=g_storageByKey[L"appearanceMaterialCache.v1.session.1"];
-static DWORD g_testSession=1;
-static bool g_sessionQueryFails=false;
-BOOL TestProcessIdToSessionId(DWORD,DWORD* session){if(g_sessionQueryFails)return FALSE;*session=g_testSession;return TRUE;}
-#define ProcessIdToSessionId TestProcessIdToSessionId
-static int g_storageReads=0,g_storageWrites=0,g_storageDeletes=0;
-size_t Wh_GetBinaryValue(PCWSTR key,void* data,size_t size){++g_storageReads;auto& value=g_storageByKey[key];if(value.size()>size)return 0;if(!value.empty())std::memcpy(data,value.data(),value.size());return value.size();}
-BOOL Wh_SetBinaryValue(PCWSTR key,void const* data,size_t size){++g_storageWrites;auto first=static_cast<unsigned char const*>(data);g_storageByKey[key].assign(first,first+size);return TRUE;}
-BOOL Wh_DeleteValue(PCWSTR key){++g_storageDeletes;g_storageByKey[key].clear();return TRUE;}
 namespace {
 // PRODUCTION
 static_assert(std::is_trivially_destructible_v<SearchCapturedMaterial>,"factory and brush entries must never own COM resources");
@@ -213,105 +202,54 @@ int Run()try{
  Check(native.kind==2&&native.color==0x00234363&&native.tint==.23&&native.luminosity==.67&&native.options==1,"native acrylic preserves transparent tint, luminosity and explicit fallback mode");
 
  custom->Attach(brush);
- auto savedBefore=CaptureSearchBrush(xaml);
- const auto writesBefore=g_storageWrites;const auto readsBefore=g_storageReads;
- for(int i=0;i<500;++i)CaptureSearchBrush(xaml);
- Check(g_storageWrites==writesBefore&&g_storageReads==readsBefore,"normal appearance polling performs no storage I/O");
- SaveSearchMaterialStorage();
- Check(g_storageWrites==writesBefore+1&&!g_storage.empty(),"definitions are saved through the mod storage API");
- auto goodStorage=g_storage;
- Check(std::wstring(g_searchMaterialStorage)==L"appearanceMaterialCache.v1.session.1","recovery storage key is scoped to the Windows session");
- {
-  auto& other=g_storageByKey[L"appearanceMaterialCache.v1.session.2"];
-  other={1,2,3,4};
-  LoadSearchMaterialStorage();
-  Check(other==std::vector<unsigned char>({1,2,3,4}),"loading one session does not read or delete another session's cache");
-  g_testSession=2;LoadSearchMaterialStorage();
-  Check(other.empty()&&g_storage==goodStorage,"discarding an invalid current-session record preserves the other session");
-  g_testSession=1;LoadSearchMaterialStorage();
-  auto& legacy=g_storageByKey[kSearchMaterialLegacyStorage];
-  legacy=goodStorage;g_storage.clear();LoadSearchMaterialStorage();
-  Check(g_searchSavedMaterials.count&&g_searchSavedMaterialsDirty,"same-process legacy recovery survives migration to a session key");
-  SaveSearchMaterialStorage();
-  Check(!g_storage.empty()&&legacy==goodStorage,"migration writes the session cache without deleting the shared legacy record");
-  auto invalidLegacy=std::make_unique<SearchSavedMaterials>();std::memcpy(invalidLegacy.get(),goodStorage.data(),goodStorage.size());invalidLegacy->process^=1;
-  std::memcpy(legacy.data(),invalidLegacy.get(),legacy.size());auto untouchedLegacy=legacy;
-  g_storage.clear();LoadSearchMaterialStorage();
-  Check(!g_searchSavedMaterials.count&&legacy==untouchedLegacy,"a foreign legacy record is ignored and left for its owning session");
-  legacy.clear();g_storage=goodStorage;LoadSearchMaterialStorage();
-  const auto reads=g_storageReads,writes=g_storageWrites,deletes=g_storageDeletes;
-  g_sessionQueryFails=true;LoadSearchMaterialStorage();g_searchSavedMaterialsDirty=true;SaveSearchMaterialStorage();
-  Check(g_storageReads==reads&&g_storageWrites==writes&&g_storageDeletes==deletes,"missing session identity disables storage I/O instead of using a shared key");
-  g_sessionQueryFails=false;LoadSearchMaterialStorage();
- }
+ auto observed=CaptureSearchBrush(xaml);
  Check(factory.Properties().Comment().empty()&&brush.Properties().Comment().empty(),"factory and brush debug comments are untouched");
  auto properties=brush.Properties().try_as<winrt::Windows::Foundation::Collections::IPropertySet>();
  Check(!properties,"no custom property container is installed on the host brush");
- {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();g_searchSavedMaterials={};}
- LoadSearchMaterialStorage();
- auto liveReload=CaptureSearchBrush(xaml);
- Check(liveReload.kind==5&&liveReload.graph==savedBefore.graph,"live material recovers exclusively from Windhawk storage after reload");
+ auto clearLiveCaches=[] {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();};
+ clearLiveCaches();
+ Check(CaptureSearchBrush(xaml).kind==4,"a live material created before capture has no fabricated reload snapshot");
  custom->Attach(nullptr);
- {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();g_searchSavedMaterials={};}
- LoadSearchMaterialStorage();
- xaml.Opacity(.42);xaml.FallbackColor(winrt::Windows::UI::Color{91,4,8,12});
- auto hiddenReload=CaptureSearchBrush(xaml);
- Check(hiddenReload.kind==5&&hiddenReload.graph==savedBefore.graph&&std::abs(hiddenReload.opacity-.42)<1e-6&&hiddenReload.fallback==0x5B04080C,"hidden Start recovers while opacity and fallback remain current");
- Check(CaptureSearchBrush(xaml)==hiddenReload,"unchanged hidden captures reuse the local cache");
- auto another=winrt::make_self<TestMaterialBrush>();
- Check(CaptureSearchBrush(another.as<wuxm::XamlCompositionBrushBase>()).kind!=5,"new theme brush does not inherit another brush's saved definition");
- // Create a native effect outside the hooks, as if another theme changed it
- // while this mod was disabled. A different composition identity rejects it.
- searchcomp::CompositionEffectFactory unseenFactory{nullptr};
- winrt::check_hresult(g_searchCreateFactory(winrt::get_abi(compositor),winrt::get_abi(static_cast<searcheffect::IGraphicsEffect>(*composite)),winrt::put_abi(unseenFactory)));
- searchcomp::CompositionEffectBrush unseenBrush{nullptr};
- winrt::check_hresult(g_searchCreateEffectBrush(winrt::get_abi(unseenFactory),winrt::put_abi(unseenBrush)));
- unseenBrush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());
- custom->Attach(unseenBrush);
- Check(CaptureSearchBrush(xaml).kind==4,"changed unobserved composition does not reuse an old theme snapshot");
- custom->Attach(brush);
- auto current=CaptureSearchBrush(xaml);
- Check(current.kind==5,"same live native composition can recover again");
+ Check(CaptureSearchBrush(xaml).kind==4,"a disconnected brush has no persisted material after a cache reset");
+ for(int pass=0;pass<20;++pass){
+  clearLiveCaches();
+  custom=winrt::make_self<TestMaterialBrush>();xaml=custom.as<wuxm::XamlCompositionBrushBase>();
+  factory=compositor.CreateEffectFactory(*composite);brush=factory.CreateBrush();
+  brush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());custom->Attach(brush);
+  auto fresh=CaptureSearchBrush(xaml);
+  Check(fresh.kind==5&&fresh.graph==observed.graph,"newly created theme material is captured after each cache reset");
+  custom->Attach(nullptr);
+  auto hidden=CaptureSearchBrush(xaml);
+  Check(hidden.kind==5&&hidden.graph==fresh.graph,"the same live brush keeps its current-load definition while hidden");
+  custom->Attach(brush);
+ }
  {
   g_testCreationResult=brush.as<wf::IUnknown>();
   const auto createBrush=g_searchCreateEffectBrush;g_searchCreateEffectBrush=TestCreateBrush;
   ForgetSearchMaterial(g_searchMaterialFactories,winrt::get_abi(factory));
   {searchcomp::CompositionEffectBrush output{nullptr};SearchCreateEffectBrushHook(winrt::get_abi(factory),winrt::put_abi(output));}
-  Check(CaptureSearchBrush(xaml).kind==4,"a recreated unsupported brush cannot inherit a persisted graph from its reused address");
+  Check(CaptureSearchBrush(xaml).kind==4,"a reused composition identity cannot inherit another material from the live-owner cache");
+  custom->Attach(nullptr);Check(CaptureSearchBrush(xaml).kind==4,"failed live capture does not expose an older hidden material");
   g_searchCreateEffectBrush=createBrush;g_testCreationResult=nullptr;
-  CacheSearchMaterial(g_searchMaterialFactories,factory,captured.graph);CacheSearchMaterial(g_searchMaterialBrushes,brush,captured.graph);CaptureSearchBrush(xaml);
-  auto inner=custom->Inner();
-  NoteSearchXamlBrush(winrt::get_abi(xaml),winrt::get_abi(inner),winrt::get_abi(inner));
-  SearchEffectGraph previous;
-  Check(!RecallSearchMaterial(xaml,nullptr,previous),"a recreated XAML wrapper cannot inherit a disconnected snapshot from its reused address");
-  CaptureSearchBrush(xaml);
+  CacheSearchMaterial(g_searchMaterialFactories,factory,captured.graph);CacheSearchMaterial(g_searchMaterialBrushes,brush,captured.graph);custom->Attach(brush);CaptureSearchBrush(xaml);
  }
- for(int pass=0;pass<20;++pass){
-  SaveSearchMaterialStorage();custom->Attach(nullptr);
-  {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();g_searchSavedMaterials={};}
-  LoadSearchMaterialStorage();
-  auto recovered=CaptureSearchBrush(xaml);Check(recovered.kind==5&&recovered.graph==savedBefore.graph,"repeated hidden update/off-on cycles retain the exact definition");
-  custom->Attach(brush);CaptureSearchBrush(xaml);
- }
- // Rebuild storage guards from a known-good record for each malformed case.
- for(int kind=0;kind<7;++kind){
-  g_storage=goodStorage;
-  auto bad=std::make_unique<SearchSavedMaterials>();std::memcpy(bad.get(),g_storage.data(),g_storage.size());
-  if(kind==0)bad->version=99;
-  if(kind==1)bad->graphSize=1;
-  if(kind==2)bad->process^=1;
-  if(kind==3)bad->created^=1;
-  if(kind==4)bad->count=33;
-  if(kind==5)bad->entries[0].graph.count=99;
-  if(kind==6)bad->entries[0].graph.nodes[0].parameter[31]='x';
-  std::memcpy(g_storage.data(),bad.get(),g_storage.size());
-  LoadSearchMaterialStorage();Check(g_searchSavedMaterials.count==0&&g_storage.empty(),"incompatible process, schema or malformed graph is discarded");
- }
- g_storage=goodStorage;LoadSearchMaterialStorage();
- for(int i=0;i<350;++i){auto temporaryFactory=compositor.CreateEffectFactory(*composite);auto temporaryBrush=temporaryFactory.CreateBrush();temporaryBrush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());}
- Check(g_searchMaterialFactories.size()<=kSearchMaterialCacheLimit&&g_searchMaterialBrushes.size()<=kSearchMaterialCacheLimit,"plain-data caches remain bounded under factory and brush churn");
- Check(CaptureSearchBrush(xaml).kind==5,"an evicted material recovers from the mod's last-known definition");
- Check(factory.Properties().Comment().empty()&&brush.Properties().Comment().empty(),"reload, cache eviction and recovery leave host metadata untouched");
+ searchcomp::CompositionEffectFactory unseenFactory{nullptr};
+ winrt::check_hresult(g_searchCreateFactory(winrt::get_abi(compositor),winrt::get_abi(static_cast<searcheffect::IGraphicsEffect>(*composite)),winrt::put_abi(unseenFactory)));
+ searchcomp::CompositionEffectBrush unseenBrush{nullptr};
+ winrt::check_hresult(g_searchCreateEffectBrush(winrt::get_abi(unseenFactory),winrt::put_abi(unseenBrush)));
+ unseenBrush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());custom->Attach(unseenBrush);
+ Check(CaptureSearchBrush(xaml).kind==4,"unobserved replacement material keeps the safe brush fallback");
+ custom->Attach(nullptr);Check(CaptureSearchBrush(xaml).kind==4,"disconnecting an unsupported replacement cannot restore the previous theme");
+ custom->Attach(brush);Check(CaptureSearchBrush(xaml).kind==5,"observed live material remains available without reload storage");
+ std::vector<searchcomp::CompositionEffectFactory> manyFactories;
+ std::vector<searchcomp::CompositionEffectBrush> manyBrushes;
+ for(int i=0;i<350;++i){auto next=compositor.CreateEffectFactory(*composite);auto value=next.CreateBrush();value.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());manyFactories.push_back(next);manyBrushes.push_back(value);}
+ Check(g_searchMaterialFactories.size()==kSearchMaterialCacheLimit&&g_searchMaterialBrushes.size()==kSearchMaterialCacheLimit,"plain-data caches stay bounded when hundreds of native objects remain alive");
+ Check(CaptureSearchBrush(xaml).kind==5,"a current live XAML material survives general-cache eviction without persistent storage");
+ brush.SetSourceParameter(L"arbitraryBackdropName",color);auto liveColor=CaptureSearchBrush(xaml);
+ Check(liveColor.kind==5&&liveColor.graph.nodes[0].color==0x17111D29,"cached live material still resolves current source colors");
+ brush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());CaptureSearchBrush(xaml);
+ Check(factory.Properties().Comment().empty()&&brush.Properties().Comment().empty(),"cache reset and eviction leave host metadata untouched");
 
  custom=nullptr;xaml=nullptr;
  for(int i=0;i<100;++i){auto temporary=winrt::make_self<TestMaterialBrush>();temporary->Attach(brush);auto snapshot=CaptureSearchBrush(temporary.as<wuxm::XamlCompositionBrushBase>());Check(snapshot.kind==5,"recreated custom brushes capture after prior owners are destroyed");}

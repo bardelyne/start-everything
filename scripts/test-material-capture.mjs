@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const output=process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(),'start-everything-material-tests-'));
+const output=process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(),'start-everything-material-capture-'));
 fs.mkdirSync(output,{recursive:true});
 const source=fs.readFileSync(path.join(root,'start-everything.wh.cpp'),'utf8');
 function part(first,last){const a=source.indexOf(first),b=source.indexOf(last,a+first.length);if(a<0||b<0)throw Error('Missing production boundary: '+first);return source.slice(a,b);}
@@ -13,8 +13,8 @@ const data=part('// Bounded, pointer-free snapshots','struct SearchSurfaceData')
 const effects=part('// Small Direct2D effect graph for Styler glass:','SearchSurfaceData CaptureLiveSurface(');
 const recreate=part('wf::IInspectable RecreateSearchEffectValue','struct SearchGlassBrush :');
 const colors='uint32_t SearchPackColor(winrt::Windows::UI::Color c){return (uint32_t(c.A)<<24)|(uint32_t(c.R)<<16)|(uint32_t(c.G)<<8)|c.B;}';
-const cpp=path.join(output,'material-recovery.cpp');
-fs.writeFileSync(cpp,fs.readFileSync(path.join(root,'tests/material-recovery.cpp'),'utf8').replace('// PRODUCTION',data+'\n'+colors+'\n'+effects+'\n'+recreate));
+const cpp=path.join(output,'material-capture.cpp');
+fs.writeFileSync(cpp,fs.readFileSync(path.join(root,'tests/material-capture.cpp'),'utf8').replace('// PRODUCTION',data+'\n'+colors+'\n'+effects+'\n'+recreate));
 const manifest=path.join(output,'test.manifest');
 fs.writeFileSync(manifest,'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1"><assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="StartEverything.MaterialTests" type="win32"/><compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application><maxversiontested Id="10.0.22621.0"/><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/></application></compatibility></assembly>');
 const embed=path.join(output,'embed-manifest.cpp');
@@ -24,7 +24,7 @@ int wmain(int argc,wchar_t** argv){if(argc!=3)return 2;HANDLE file=CreateFileW(a
 const compiler=process.env.CXX || 'C:/Program Files/Windhawk/Compiler/bin/clang++.exe';
 const options={encoding:'utf8',windowsHide:true,env:{...process.env,TEMP:output,TMP:output}};
 function run(file,args){const r=spawnSync(file,args,{...options,timeout:120000});if(r.status!==0){process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||String(r.error||''));process.exit(r.status??1);}return r.stdout||'';}
-const exe=path.join(output,'material-recovery.exe'),embedExe=path.join(output,'embed-manifest.exe');
+const exe=path.join(output,'material-capture.exe'),embedExe=path.join(output,'embed-manifest.exe');
 run(compiler,['--target=x86_64-w64-mingw32','-std=c++23','-O2','-static',cpp,'-o',exe,'-ld2d1','-lole32','-loleaut32','-lruntimeobject','-luuid','-luser32']);
 run(compiler,['--target=x86_64-w64-mingw32','-std=c++23','-O2','-static','-municode',embed,'-o',embedExe]);
 run(embedExe,[exe,manifest]);
