@@ -25,6 +25,8 @@
 #include <cstdio>
 #include <string>
 #include <cstring>
+#include <cwchar>
+#include <type_traits>
 namespace wf=winrt::Windows::Foundation;
 namespace wux=winrt::Windows::UI::Xaml;
 namespace wuxc=wux::Controls;
@@ -34,13 +36,28 @@ static int checks=0,failures=0;
 #define Wh_Log(...) ((void)0)
 bool Wh_SetFunctionHook(void* target,void*,void** original){*original=target;return true;}
 namespace WindhawkUtils { template<class Prototype> bool SetFunctionHook(Prototype* target, Prototype* hook, Prototype** original) { return Wh_SetFunctionHook(reinterpret_cast<void*>(target),reinterpret_cast<void*>(hook),reinterpret_cast<void**>(original)); } }
-static std::vector<unsigned char> g_storage;
+static std::unordered_map<std::wstring,std::vector<unsigned char>> g_storageByKey;
+static auto& g_storage=g_storageByKey[L"appearanceMaterialCache.v1.session.1"];
+static DWORD g_testSession=1;
+static bool g_sessionQueryFails=false;
+BOOL TestProcessIdToSessionId(DWORD,DWORD* session){if(g_sessionQueryFails)return FALSE;*session=g_testSession;return TRUE;}
+#define ProcessIdToSessionId TestProcessIdToSessionId
 static int g_storageReads=0,g_storageWrites=0,g_storageDeletes=0;
-size_t Wh_GetBinaryValue(PCWSTR,void* data,size_t size){++g_storageReads;if(g_storage.size()>size)return 0;if(!g_storage.empty())std::memcpy(data,g_storage.data(),g_storage.size());return g_storage.size();}
-BOOL Wh_SetBinaryValue(PCWSTR,void const* data,size_t size){++g_storageWrites;auto first=static_cast<unsigned char const*>(data);g_storage.assign(first,first+size);return TRUE;}
-BOOL Wh_DeleteValue(PCWSTR){++g_storageDeletes;g_storage.clear();return TRUE;}
+size_t Wh_GetBinaryValue(PCWSTR key,void* data,size_t size){++g_storageReads;auto& value=g_storageByKey[key];if(value.size()>size)return 0;if(!value.empty())std::memcpy(data,value.data(),value.size());return value.size();}
+BOOL Wh_SetBinaryValue(PCWSTR key,void const* data,size_t size){++g_storageWrites;auto first=static_cast<unsigned char const*>(data);g_storageByKey[key].assign(first,first+size);return TRUE;}
+BOOL Wh_DeleteValue(PCWSTR key){++g_storageDeletes;g_storageByKey[key].clear();return TRUE;}
 namespace {
 // PRODUCTION
+static_assert(std::is_trivially_destructible_v<SearchCapturedMaterial>,"factory and brush entries must never own COM resources");
+struct TestCachedIdentity : winrt::implements<TestCachedIdentity,wf::IInspectable> {};
+struct ThrowingPropertyNames : winrt::implements<ThrowingPropertyNames,wf::Collections::IIterable<winrt::hstring>> {
+ wf::Collections::IIterator<winrt::hstring> First(){throw winrt::hresult_error(E_FAIL);}
+};
+static wf::IUnknown g_testCreationResult{nullptr};
+HRESULT TestCreationResult(void** result){if(!result)return E_POINTER;*result=winrt::get_abi(g_testCreationResult);static_cast<IUnknown*>(*result)->AddRef();return S_OK;}
+HRESULT WINAPI TestCreateFactory(void*,void*,void** result){return TestCreationResult(result);}
+HRESULT WINAPI TestCreateFactoryWithProperties(void*,void*,void*,void** result){return TestCreationResult(result);}
+HRESULT WINAPI TestCreateBrush(void*,void** result){return TestCreationResult(result);}
 struct HookTable {
  std::vector<std::pair<void**,void*>> entries;
  void Add(void* object,size_t slot,void* replacement){auto table=*reinterpret_cast<void***>(object);auto at=&table[slot];DWORD old=0;if(!VirtualProtect(at,sizeof(void*),PAGE_READWRITE,&old))throw winrt::hresult_error(HRESULT_FROM_WIN32(GetLastError()));entries.emplace_back(at,*at);*at=replacement;DWORD ignored;VirtualProtect(at,sizeof(void*),old,&ignored);}
@@ -115,6 +132,52 @@ int Run()try{
  copiedBrush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());
  SearchEffectGraph roundtrip;CaptureSearchEffectNode(recreated.as<searcheffect::IGraphicsEffectSource>(),roundtrip);
  Check(roundtrip==captured.graph,"reconstructed graph matches captured properties, order and connections");
+ {
+  auto identity=winrt::make_self<TestCachedIdentity>();
+  auto object=identity.as<wf::IInspectable>();auto weak=winrt::make_weak(object);
+  CacheSearchMaterial(g_searchMaterialFactories,object,captured.graph);
+  identity=nullptr;object=nullptr;
+  Check(!weak.get(),"factory definition cache does not keep its native object alive");
+  identity=winrt::make_self<TestCachedIdentity>();object=identity.as<wf::IInspectable>();weak=winrt::make_weak(object);
+  CacheSearchMaterial(g_searchMaterialBrushes,object,captured.graph);
+  identity=nullptr;object=nullptr;
+  Check(!weak.get(),"brush definition cache does not keep its native object alive");
+ }
+ {
+  const auto create=g_searchCreateFactory;
+  const auto createBrush=g_searchCreateEffectBrush;
+  const auto createProperties=g_searchCreateFactoryWithProperties;
+  g_searchCreateFactory=TestCreateFactory;
+  g_searchCreateFactoryWithProperties=TestCreateFactoryWithProperties;
+  g_searchCreateEffectBrush=TestCreateBrush;
+  g_testCreationResult=factory.as<wf::IUnknown>();
+  auto identity=factory.as<IUnknown>();
+  SearchEffectGraph found;
+  auto stale=[&]{CacheSearchMaterial(g_searchMaterialFactories,factory,captured.graph);};
+  stale();
+  {searchcomp::CompositionEffectFactory output{nullptr};SearchCreateFactoryHook(nullptr,nullptr,winrt::put_abi(output));}
+  Check(!FindSearchMaterial(g_searchMaterialFactories,factory,found),"reused factory identity is forgotten when there is no capturable effect");
+  stale();
+  auto unsupported=wf::PropertyValue::CreateString(L"not an effect graph");
+  {searchcomp::CompositionEffectFactory output{nullptr};SearchCreateFactoryHook(nullptr,winrt::get_abi(unsupported),winrt::put_abi(output));}
+  Check(!FindSearchMaterial(g_searchMaterialFactories,factory,found),"throwing graph capture cannot leave a reused factory definition");
+  stale();
+  auto animated=winrt::single_threaded_vector<winrt::hstring>({L"Tint.Color"});
+  {searchcomp::CompositionEffectFactory output{nullptr};SearchCreateFactoryWithPropertiesHook(nullptr,winrt::get_abi(static_cast<searcheffect::IGraphicsEffect>(*composite)),winrt::get_abi(animated.as<wf::Collections::IIterable<winrt::hstring>>()),winrt::put_abi(output));}
+  Check(!FindSearchMaterial(g_searchMaterialFactories,factory,found),"animated creation invalidates a prior static graph at the same identity");
+  stale();
+  auto throwing=winrt::make_self<ThrowingPropertyNames>();
+  {searchcomp::CompositionEffectFactory output{nullptr};SearchCreateFactoryWithPropertiesHook(nullptr,nullptr,winrt::get_abi(throwing.as<wf::Collections::IIterable<winrt::hstring>>()),winrt::put_abi(output));}
+  Check(!FindSearchMaterial(g_searchMaterialFactories,factory,found),"animation enumeration failure still invalidates the reused factory identity");
+  g_testCreationResult=brush.as<wf::IUnknown>();
+  CacheSearchMaterial(g_searchMaterialBrushes,brush,captured.graph);
+  {searchcomp::CompositionEffectBrush output{nullptr};SearchCreateEffectBrushHook(winrt::get_abi(factory),winrt::put_abi(output));}
+  Check(!FindSearchMaterial(g_searchMaterialBrushes,brush,found),"brush creation clears a reused identity even if its factory was not captured");
+  g_searchCreateFactory=create;g_searchCreateFactoryWithProperties=createProperties;g_searchCreateEffectBrush=createBrush;
+  g_testCreationResult=nullptr;
+  CacheSearchMaterial(g_searchMaterialFactories,factory,captured.graph);
+  CacheSearchMaterial(g_searchMaterialBrushes,brush,captured.graph);
+ }
  std::printf("GPU factory source=%d copy=%d error=%08X\n",int(factory.LoadStatus()),int(copiedFactory.LoadStatus()),unsigned(copiedFactory.ExtendedError())); Check(SUCCEEDED(copiedFactory.ExtendedError()),"Windows creates the reconstructed material without a GPU compilation error");
  for(int alpha=0;alpha<=255;++alpha){
   auto flood=winrt::make_self<SearchEffect>(CLSID_D2D1Flood);
@@ -157,6 +220,30 @@ int Run()try{
  SaveSearchMaterialStorage();
  Check(g_storageWrites==writesBefore+1&&!g_storage.empty(),"definitions are saved through the mod storage API");
  auto goodStorage=g_storage;
+ Check(std::wstring(g_searchMaterialStorage)==L"appearanceMaterialCache.v1.session.1","recovery storage key is scoped to the Windows session");
+ {
+  auto& other=g_storageByKey[L"appearanceMaterialCache.v1.session.2"];
+  other={1,2,3,4};
+  LoadSearchMaterialStorage();
+  Check(other==std::vector<unsigned char>({1,2,3,4}),"loading one session does not read or delete another session's cache");
+  g_testSession=2;LoadSearchMaterialStorage();
+  Check(other.empty()&&g_storage==goodStorage,"discarding an invalid current-session record preserves the other session");
+  g_testSession=1;LoadSearchMaterialStorage();
+  auto& legacy=g_storageByKey[kSearchMaterialLegacyStorage];
+  legacy=goodStorage;g_storage.clear();LoadSearchMaterialStorage();
+  Check(g_searchSavedMaterials.count&&g_searchSavedMaterialsDirty,"same-process legacy recovery survives migration to a session key");
+  SaveSearchMaterialStorage();
+  Check(!g_storage.empty()&&legacy==goodStorage,"migration writes the session cache without deleting the shared legacy record");
+  auto invalidLegacy=std::make_unique<SearchSavedMaterials>();std::memcpy(invalidLegacy.get(),goodStorage.data(),goodStorage.size());invalidLegacy->process^=1;
+  std::memcpy(legacy.data(),invalidLegacy.get(),legacy.size());auto untouchedLegacy=legacy;
+  g_storage.clear();LoadSearchMaterialStorage();
+  Check(!g_searchSavedMaterials.count&&legacy==untouchedLegacy,"a foreign legacy record is ignored and left for its owning session");
+  legacy.clear();g_storage=goodStorage;LoadSearchMaterialStorage();
+  const auto reads=g_storageReads,writes=g_storageWrites,deletes=g_storageDeletes;
+  g_sessionQueryFails=true;LoadSearchMaterialStorage();g_searchSavedMaterialsDirty=true;SaveSearchMaterialStorage();
+  Check(g_storageReads==reads&&g_storageWrites==writes&&g_storageDeletes==deletes,"missing session identity disables storage I/O instead of using a shared key");
+  g_sessionQueryFails=false;LoadSearchMaterialStorage();
+ }
  Check(factory.Properties().Comment().empty()&&brush.Properties().Comment().empty(),"factory and brush debug comments are untouched");
  auto properties=brush.Properties().try_as<winrt::Windows::Foundation::Collections::IPropertySet>();
  Check(!properties,"no custom property container is installed on the host brush");
@@ -185,6 +272,20 @@ int Run()try{
  custom->Attach(brush);
  auto current=CaptureSearchBrush(xaml);
  Check(current.kind==5,"same live native composition can recover again");
+ {
+  g_testCreationResult=brush.as<wf::IUnknown>();
+  const auto createBrush=g_searchCreateEffectBrush;g_searchCreateEffectBrush=TestCreateBrush;
+  ForgetSearchMaterial(g_searchMaterialFactories,winrt::get_abi(factory));
+  {searchcomp::CompositionEffectBrush output{nullptr};SearchCreateEffectBrushHook(winrt::get_abi(factory),winrt::put_abi(output));}
+  Check(CaptureSearchBrush(xaml).kind==4,"a recreated unsupported brush cannot inherit a persisted graph from its reused address");
+  g_searchCreateEffectBrush=createBrush;g_testCreationResult=nullptr;
+  CacheSearchMaterial(g_searchMaterialFactories,factory,captured.graph);CacheSearchMaterial(g_searchMaterialBrushes,brush,captured.graph);CaptureSearchBrush(xaml);
+  auto inner=custom->Inner();
+  NoteSearchXamlBrush(winrt::get_abi(xaml),winrt::get_abi(inner),winrt::get_abi(inner));
+  SearchEffectGraph previous;
+  Check(!RecallSearchMaterial(xaml,nullptr,previous),"a recreated XAML wrapper cannot inherit a disconnected snapshot from its reused address");
+  CaptureSearchBrush(xaml);
+ }
  for(int pass=0;pass<20;++pass){
   SaveSearchMaterialStorage();custom->Attach(nullptr);
   {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();g_searchSavedMaterials={};}
@@ -208,7 +309,7 @@ int Run()try{
  }
  g_storage=goodStorage;LoadSearchMaterialStorage();
  for(int i=0;i<350;++i){auto temporaryFactory=compositor.CreateEffectFactory(*composite);auto temporaryBrush=temporaryFactory.CreateBrush();temporaryBrush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());}
- Check(g_searchMaterialFactories.size()<=kSearchMaterialCacheLimit&&g_searchMaterialBrushes.size()<=kSearchMaterialCacheLimit,"native references remain bounded under factory and brush churn");
+ Check(g_searchMaterialFactories.size()<=kSearchMaterialCacheLimit&&g_searchMaterialBrushes.size()<=kSearchMaterialCacheLimit,"plain-data caches remain bounded under factory and brush churn");
  Check(CaptureSearchBrush(xaml).kind==5,"an evicted material recovers from the mod's last-known definition");
  Check(factory.Properties().Comment().empty()&&brush.Properties().Comment().empty(),"reload, cache eviction and recovery leave host metadata untouched");
 
@@ -224,10 +325,26 @@ int Run()try{
  bool rejected=false;try{SearchEffectGraph cycle;CaptureSearchEffectNode(static_cast<searcheffect::IGraphicsEffectSource>(*recursive),cycle);}catch(...){rejected=true;}
  recursive->sources.clear();Check(rejected,"cyclic effect descriptions hit bounded recursion");
  brush=nullptr;factory=nullptr;copiedBrush=nullptr;copiedFactory=nullptr;
- std::thread stopOnEngineThread([]{winrt::init_apartment(winrt::apartment_type::multi_threaded);StopSearchMaterialCapture();winrt::uninit_apartment();});stopOnEngineThread.join();Check(g_searchMaterialFactories.empty()&&g_searchMaterialBrushes.empty()&&g_searchMaterialXaml.empty(),"shutdown releases every mod-owned factory and brush reference");
+ std::thread stopOnEngineThread([]{winrt::init_apartment(winrt::apartment_type::multi_threaded);StopSearchMaterialCapture();winrt::uninit_apartment();});stopOnEngineThread.join();Check(g_searchMaterialFactories.empty()&&g_searchMaterialBrushes.empty()&&g_searchMaterialXaml.empty(),"engine-thread shutdown clears definitions without owning factory or brush references");
  std::printf("RESULT %d checks, %d failures; appearance packet %zu bytes\n",checks,failures,sizeof(SearchBrushData));
  return failures?1:0;
 }catch(winrt::hresult_error const& e){std::printf("ERROR %08X %ls\n",unsigned(e.code()),e.message().c_str());return 2;}catch(...){std::puts("ERROR unknown");return 3;}
 
 LONG WINAPI Fault(EXCEPTION_POINTERS* e){std::printf("FAULT %08X at %p\n",unsigned(e->ExceptionRecord->ExceptionCode),e->ExceptionRecord->ExceptionAddress);void* frames[30];auto n=CaptureStackBackTrace(0,30,frames,nullptr);for(USHORT i=0;i<n;++i){HMODULE m=nullptr;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<PCWSTR>(frames[i]),&m);wchar_t path[512]{};GetModuleFileNameW(m,path,512);std::printf("FRAME %p +%llx %ls\n",frames[i],(unsigned long long)((char*)frames[i]-(char*)m),path);}return EXCEPTION_EXECUTE_HANDLER;}
-int main(){SetUnhandledExceptionFilter(Fault);AddVectoredExceptionHandler(1,[](EXCEPTION_POINTERS* e)->LONG{if(e->ExceptionRecord->ExceptionCode==0xc0000005)Fault(e);return EXCEPTION_CONTINUE_SEARCH;});winrt::init_apartment(winrt::apartment_type::multi_threaded);auto c=winrt::Windows::System::DispatcherQueueController::CreateOnDedicatedThread();std::promise<int> done;auto f=done.get_future();c.DispatcherQueue().TryEnqueue([&]{done.set_value(Run());});int result=f.get();c.ShutdownQueueAsync().get();return result;}
+void ExitWithLiveMaterialCaches()try{
+ std::setvbuf(stdout,nullptr,_IONBF,0);
+ InitSearchMaterialCapture();
+ searchcomp::Compositor compositor;
+ auto effect=winrt::make_self<SearchEffect>(CLSID_D2D1Flood);
+ effect->properties={wf::PropertyValue::CreateSingleArray({.1f,.2f,.3f,.5f})};
+ auto factory=compositor.CreateEffectFactory(*effect);
+ NoteSearchEffectFactory(winrt::get_abi(static_cast<searcheffect::IGraphicsEffect>(*effect)),winrt::get_abi(factory));
+ searchcomp::CompositionEffectBrush brush{nullptr};
+ winrt::check_hresult(SearchCreateEffectBrushHook(winrt::get_abi(factory),winrt::put_abi(brush)));
+ Check(g_searchMaterialFactories.size()==1&&g_searchMaterialBrushes.size()==1,"process exit starts with populated material caches and live composition objects");
+ std::printf("RESULT process-exit checks=%d failures=%d; no unload callback\n",checks,failures);
+ // Deliberately skip StopSearchMaterialCapture and terminate the main thread
+ // before global destructors run, exactly like a normal host-process exit.
+ ExitProcess(failures?1:0);
+}catch(...){std::puts("ERROR process-exit setup failed");ExitProcess(2);}
+int main(int argc,char** argv){SetUnhandledExceptionFilter(Fault);AddVectoredExceptionHandler(1,[](EXCEPTION_POINTERS* e)->LONG{if(e->ExceptionRecord->ExceptionCode==0xc0000005)Fault(e);return EXCEPTION_CONTINUE_SEARCH;});winrt::init_apartment(winrt::apartment_type::multi_threaded);auto c=winrt::Windows::System::DispatcherQueueController::CreateOnDedicatedThread();std::promise<int> done;auto f=done.get_future();c.DispatcherQueue().TryEnqueue([&]{if(argc>1&&std::strcmp(argv[1],"--exit-live-cache")==0)ExitWithLiveMaterialCaches();done.set_value(Run());});int result=f.get();c.ShutdownQueueAsync().get();return result;}

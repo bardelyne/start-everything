@@ -33,4 +33,10 @@ fs.writeFileSync(path.join(output,'results.log'),(result.stdout||'')+(result.std
 process.stdout.write((result.stdout||'').split('\n').filter(line=>/FAIL|ERROR|FAULT|RESULT|CACHE/.test(line)).join('\n')+'\n');
 if(result.stderr)process.stderr.write(result.stderr);
 if(result.error)process.stderr.write(String(result.error));
-process.exit(result.status??1);
+if(result.status!==0)process.exit(result.status??1);
+const shutdown=spawnSync(exe,['--exit-live-cache'],{...options,timeout:30000});
+fs.writeFileSync(path.join(output,'process-exit.log'),(shutdown.stdout||'')+(shutdown.stderr||''));
+process.stdout.write(shutdown.stdout||'');
+if(shutdown.stderr)process.stderr.write(shutdown.stderr);
+if(shutdown.error)process.stderr.write(String(shutdown.error));
+process.exit(shutdown.status??1);
