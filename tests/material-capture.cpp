@@ -8,7 +8,6 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Effects.h>
 #include <winrt/Windows.UI.Composition.h>
-#include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
@@ -36,9 +35,17 @@ static int checks=0,failures=0;
 #define Wh_Log(...) ((void)0)
 bool Wh_SetFunctionHook(void* target,void*,void** original){*original=target;return true;}
 namespace WindhawkUtils { template<class Prototype> bool SetFunctionHook(Prototype* target, Prototype* hook, Prototype** original) { return Wh_SetFunctionHook(reinterpret_cast<void*>(target),reinterpret_cast<void*>(hook),reinterpret_cast<void**>(original)); } }
+
+static std::unordered_map<std::wstring,std::vector<unsigned char>> testStorage;
+static int storageReads=0,storageWrites=0;static bool storageWritable=true;
+size_t Wh_GetBinaryValue(PCWSTR key,void* data,size_t capacity){++storageReads;auto found=testStorage.find(key);if(found==testStorage.end()||found->second.size()>capacity)return 0;std::memcpy(data,found->second.data(),found->second.size());return found->second.size();}
+BOOL Wh_SetBinaryValue(PCWSTR key,void const* data,size_t size){++storageWrites;if(!storageWritable)return FALSE;auto bytes=static_cast<unsigned char const*>(data);testStorage[key]=std::vector<unsigned char>(bytes,bytes+size);return TRUE;}
+BOOL Wh_DeleteValue(PCWSTR key){return testStorage.erase(key)!=0;}
+
 namespace {
 // PRODUCTION
 static_assert(std::is_trivially_destructible_v<SearchCapturedMaterial>,"factory and brush entries must never own COM resources");
+static_assert(std::is_trivially_copyable_v<SearchSavedMaterials>,"saved recovery data must never own COM objects or pointers");
 struct TestCachedIdentity : winrt::implements<TestCachedIdentity,wf::IInspectable> {};
 struct ThrowingPropertyNames : winrt::implements<ThrowingPropertyNames,wf::Collections::IIterable<winrt::hstring>> {
  wf::Collections::IIterator<winrt::hstring> First(){throw winrt::hresult_error(E_FAIL);}
@@ -60,7 +67,7 @@ struct TestMaterialBrush : wuxm::XamlCompositionBrushBaseT<TestMaterialBrush> {
 struct TestWarmMaterialBrush : wuxm::XamlCompositionBrushBaseT<TestWarmMaterialBrush> {
  using Base=wuxm::XamlCompositionBrushBaseT<TestWarmMaterialBrush>;
  searchcomp::Compositor compositor;
- float radius=43.f;int connects=0,disconnects=0;bool unsupported=false,failDisconnect=false,failConnect=false,reenter=false,hideProtected=true;
+ float radius=43.f;int connects=0,disconnects=0;bool hideProtected=true;
  int32_t __stdcall QueryInterface(winrt::guid const& id,void** out)noexcept{
   if(hideProtected&&id==winrt::guid_of<wuxm::IXamlCompositionBrushBaseProtected>()){*out=nullptr;return E_NOINTERFACE;}
   return Base::QueryInterface(id,out);
@@ -69,17 +76,14 @@ struct TestWarmMaterialBrush : wuxm::XamlCompositionBrushBaseT<TestWarmMaterialB
  searchcomp::CompositionBrush Current()const{return CompositionBrush();}
  void OnConnected(){
   ++connects;
-  if(failConnect)throw winrt::hresult_error(E_FAIL);
-  if(reenter)CaptureSearchBrush(this->get_strong().as<wuxm::XamlCompositionBrushBase>());
   if(CompositionBrush())return;
-  if(unsupported){CompositionBrush(compositor.CreateSurfaceBrush());return;}
   auto effect=winrt::make_self<SearchEffect>(CLSID_D2D1GaussianBlur);
   effect->properties={wf::PropertyValue::CreateSingle(radius),wf::PropertyValue::CreateUInt32(1),wf::PropertyValue::CreateUInt32(1)};
   effect->sources={searchcomp::CompositionEffectSourceParameter(L"WarmBackdrop")};
   auto factory=compositor.CreateEffectFactory(*effect);auto brush=factory.CreateBrush();
   brush.SetSourceParameter(L"WarmBackdrop",compositor.CreateBackdropBrush());CompositionBrush(brush);
  }
- void OnDisconnected(){++disconnects;if(auto brush=CompositionBrush())brush.Close();CompositionBrush(nullptr);if(failDisconnect)throw winrt::hresult_error(E_FAIL);}
+ void OnDisconnected(){++disconnects;if(auto brush=CompositionBrush())brush.Close();CompositionBrush(nullptr);}
 };
 void Check(bool value,const char* name){++checks;if(!value)++failures;std::printf("%s %s\n",value?"PASS":"FAIL",name);}
 }
@@ -90,7 +94,7 @@ int Run()try{
   InitSearchMaterialCapture();
   Check(g_searchMaterialCapture,"cold initialization registers all material hooks");
   Check(std::all_of(g_searchMaterialModules.begin(),g_searchMaterialModules.end(),[](auto module){return module!=nullptr;}),"all hook-target libraries are held after discovery thread exits");
-  for(auto target:{reinterpret_cast<void*>(g_searchCreateFactory),reinterpret_cast<void*>(g_searchCreateFactoryWithProperties),reinterpret_cast<void*>(g_searchCreateEffectBrush),reinterpret_cast<void*>(g_searchCreateXamlBrush),reinterpret_cast<void*>(g_searchPutXamlComposition)}){
+  for(auto target:{reinterpret_cast<void*>(g_searchCreateFactory),reinterpret_cast<void*>(g_searchCreateFactoryWithProperties),reinterpret_cast<void*>(g_searchCreateEffectBrush),reinterpret_cast<void*>(g_searchCreateXamlBrush)}){
    MEMORY_BASIC_INFORMATION memory{};Check(VirtualQuery(target,&memory,sizeof(memory))&&memory.State==MEM_COMMIT&&(memory.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)),"pending hook points to loaded executable code before hook application");
   }
   StopSearchMaterialCapture();
@@ -211,10 +215,6 @@ int Run()try{
  brush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateSurfaceBrush());SearchBrushData unsupported;
  Check(!TryCaptureSearchCompositionBrush(brush,unsupported),"non-transferable surfaces fail safely instead of being misread as backdrops");
  auto manager=wux::Hosting::WindowsXamlManager::InitializeForCurrentThread();
-  auto setterProbe=winrt::make_self<TestMaterialBrush>();
-  auto setterAccess=setterProbe->Inner().as<wuxm::IXamlCompositionBrushBaseProtected>();
-  testHooks.Add(winrt::get_abi(setterAccess),7,reinterpret_cast<void*>(SearchPutXamlCompositionHook));
-  setterAccess=nullptr;setterProbe=nullptr;
  brush.SetSourceParameter(L"arbitraryBackdropName",compositor.CreateBackdropBrush());
  auto custom=winrt::make_self<TestMaterialBrush>();custom->Attach(brush);
  auto xaml=custom.as<wuxm::XamlCompositionBrushBase>();
@@ -237,9 +237,9 @@ int Run()try{
  Check(!properties,"no custom property container is installed on the host brush");
  auto clearLiveCaches=[] {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();};
  clearLiveCaches();
- Check(CaptureSearchBrush(xaml).kind==4,"a live material created before capture has no fabricated reload snapshot");
+ Check(CaptureSearchBrush(xaml).kind==5,"a previously observed live brush recovers from its plain continuity snapshot");
  custom->Attach(nullptr);
- Check(CaptureSearchBrush(xaml).kind==4,"a disconnected brush has no persisted material after a cache reset");
+ Check(CaptureSearchBrush(xaml).kind==5,"a previously observed hidden brush recovers without reconnecting its resources");
  for(int pass=0;pass<20;++pass){
   clearLiveCaches();
   custom=winrt::make_self<TestMaterialBrush>();xaml=custom.as<wuxm::XamlCompositionBrushBase>();
@@ -291,50 +291,81 @@ int Run()try{
  auto recursive=winrt::make_self<SearchEffect>(CLSID_D2D1Composite);recursive->sources={*recursive};
  bool rejected=false;try{SearchEffectGraph cycle;CaptureSearchEffectNode(static_cast<searcheffect::IGraphicsEffectSource>(*recursive),cycle);}catch(...){rejected=true;}
  recursive->sources.clear();Check(rejected,"cyclic effect descriptions hit bounded recursion");
-
- // Simulate a DLL unload/load with the same live XAML wrapper and compositor.
- // Materials created or changed while disabled must be read from the brush's
- // current lifecycle, rather than from any saved theme definition.
+ // Materials that predate this load are read passively. Capturing must never
+ // call lifecycle overrides on another owner's brush, visible or disconnected.
  {
   auto reset=[] {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();};
   g_searchMaterialCapture=false;reset();
   auto warm=winrt::make_self<TestWarmMaterialBrush>();warm->OnConnected();auto warmXaml=warm.as<wuxm::XamlCompositionBrushBase>();
-  Check(!warmXaml.try_as<wuxm::IXamlCompositionBrushBaseProtected>(),"warm aggregate hides its protected interface exactly like Styler");
-  Check(CaptureSearchBrush(warmXaml).kind==4&&warm->connects==1,"disabled capture does not refresh a host brush");
-  g_searchMaterialCapture=true;
+  Check(!warmXaml.try_as<wuxm::IXamlCompositionBrushBaseProtected>(),"pre-existing opaque brush keeps its protected interface private");
   for(int pass=0;pass<20;++pass){
    g_searchMaterialCapture=false;reset();warm->OnDisconnected();warm->radius=43.f+pass;warm->OnConnected();
    warm->hideProtected=pass%4<2;
-   // Also cover re-enabling while Start has disconnected the brush while hidden.
    if(pass%2)warm->OnDisconnected();
-   const int connects=warm->connects,disconnects=warm->disconnects;g_searchMaterialCapture=true;
-   auto material=CaptureSearchBrush(warmXaml);
-   Check(material.kind==5&&material.graph.nodes[1].properties[0].values[0]==warm->radius,"warm enable captures the current exact graph after each off/on cycle");
-   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"warm refresh runs one balanced lifecycle pair");
-   for(int read=0;read<100;++read)CaptureSearchBrush(warmXaml);
-   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"repeated appearance reads never reconnect an already observed brush");
-  }
-  auto nativeWarm=warm->Current().as<searchcomp::CompositionEffectBrush>();
-  nativeWarm.SetSourceParameter(L"WarmBackdrop",warm->compositor.CreateColorBrush(winrt::Windows::UI::Color{101,29,31,37}));
-  auto updated=CaptureSearchBrush(warmXaml);
-  Check(updated.kind==5&&updated.graph.nodes[0].kind==3&&updated.graph.nodes[0].color==0x651D1F25,"warm owner reads current source changes through its observed native assignment");
-  nativeWarm=nullptr;warm->OnDisconnected();
-  {std::lock_guard lock(g_searchMaterialMutex);Check(!g_searchMaterialXaml.at(warmXaml.as<IUnknown>().get()).compositionObject,"disconnect clears the observed native pointer without retaining its brush");}
-  Check(CaptureSearchBrush(warmXaml).kind==5,"an explicitly disconnected warm owner keeps its current-load material");
-  g_searchMaterialCapture=false;reset();warm->OnConnected();warm->reenter=true;g_searchMaterialCapture=true;
-  Check(CaptureSearchBrush(warmXaml).kind==5,"a reentrant custom connect cannot recurse into another refresh");
-  warm->reenter=false;
-  for(int failure=0;failure<3;++failure){
-   g_searchMaterialCapture=false;reset();warm->OnDisconnected();warm->unsupported=failure==0;warm->OnConnected();
-   warm->failDisconnect=failure==1;warm->failConnect=failure==2;g_searchMaterialCapture=true;
    const int connects=warm->connects,disconnects=warm->disconnects;
-   CaptureSearchBrush(warmXaml);
-   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"failed or unsupported refresh still attempts reconnection once");
-   for(int read=0;read<20;++read)CaptureSearchBrush(warmXaml);
-   Check(warm->connects==connects+1&&warm->disconnects==disconnects+1,"failed or unsupported refresh never loops on appearance polling");
-   warm->failDisconnect=false;warm->failConnect=false;warm->unsupported=false;
+   auto before=warm->Current();g_searchMaterialCapture=true;
+   auto material=CaptureSearchBrush(warmXaml);
+   Check(material.kind==4,"uncaptured pre-existing effects use the documented approximation");
+   for(int read=0;read<100;++read)CaptureSearchBrush(warmXaml);
+   Check(warm->connects==connects&&warm->disconnects==disconnects,"appearance polling never invokes a foreign brush lifecycle");
+   Check(warm->Current()==before,"capture preserves the current composition assignment, including null");
   }
   warm->OnDisconnected();warm=nullptr;warmXaml=nullptr;
+ }
+
+ // Reload continuity uses only this mod's serialized data and current identities.
+ {
+  auto clearLive=[] {std::lock_guard lock(g_searchMaterialMutex);g_searchMaterialFactories.clear();g_searchMaterialBrushes.clear();g_searchMaterialXaml.clear();};
+  auto resetRuntime=[&] {clearLive();g_searchSavedMaterials={};g_searchMaterialStorage[0]=0;g_searchSavedMaterialsDirty=false;};
+  testStorage.clear();resetRuntime();LoadSearchMaterialStorage();g_searchMaterialCapture=true;
+  auto warm=winrt::make_self<TestWarmMaterialBrush>();warm->hideProtected=false;warm->OnConnected();
+  auto warmXaml=warm.as<wuxm::XamlCompositionBrushBase>();auto original=CaptureSearchBrush(warmXaml);
+  Check(original.kind==5&&g_searchSavedMaterials.count==1,"an observed custom material seeds the plain-data continuity cache");
+  SearchSavedMaterial keyA,keyB;SearchMaterialOwnerKey(warmXaml,keyA);SearchMaterialOwnerKey(warmXaml,keyB);
+  Check(keyA.owner==keyB.owner&&keyA.weak==keyB.weak&&keyA.weak,"weak identity stays stable without retaining another reference");
+  for(int pass=0;pass<20;++pass){
+   if(pass%2)warm->OnDisconnected();
+   SaveSearchMaterialStorage();g_searchMaterialCapture=false;resetRuntime();LoadSearchMaterialStorage();g_searchMaterialCapture=true;
+   warm->hideProtected=pass%4<2;
+   const int connects=warm->connects,disconnects=warm->disconnects;auto before=warm->Current();
+   auto recovered=CaptureSearchBrush(warmXaml);
+   Check(recovered.kind==5&&recovered.graph==original.graph,"reload recovers the exact graph for the same visible or hidden brush");
+   Check(warm->connects==connects&&warm->disconnects==disconnects&&warm->Current()==before,"reload never reconnects or replaces the host's resources");
+   const int reads=storageReads,writes=storageWrites;
+   for(int read=0;read<20;++read)CaptureSearchBrush(warmXaml);
+   Check(storageReads==reads&&storageWrites==writes,"appearance polling performs no recovery storage I/O");
+   if(!before){warm->OnConnected();warm->hideProtected=false;original=CaptureSearchBrush(warmXaml);}
+  }
+  warm->hideProtected=true;clearLive();SaveSearchMaterialStorage();
+  auto valid=std::make_unique<SearchSavedMaterials>(g_searchSavedMaterials);
+  auto blob=[&](SearchSavedMaterials const& input){auto saved=std::make_unique<SearchSavedMaterials>(input);saved->checksum=SearchMaterialChecksum(*saved);size_t size=offsetof(SearchSavedMaterials,entries)+saved->count*sizeof(SearchSavedMaterial);auto bytes=reinterpret_cast<unsigned char const*>(saved.get());testStorage[g_searchMaterialStorage]=std::vector<unsigned char>(bytes,bytes+size);};
+  auto expectRejected=[&](SearchSavedMaterials const& saved,const char* label){blob(saved);resetRuntime();LoadSearchMaterialStorage();Check(g_searchSavedMaterials.count==0,label);};
+  auto invalid=std::make_unique<SearchSavedMaterials>(*valid);invalid->process^=1;expectRejected(*invalid,"a different process ID cannot reuse material continuity data");
+  *invalid=*valid;invalid->created^=1;expectRejected(*invalid,"a restarted Start with a reused PID cannot reuse old materials");
+  *invalid=*valid;invalid->version++;expectRejected(*invalid,"unknown recovery formats fail closed");
+  *invalid=*valid;invalid->graphSize++;expectRejected(*invalid,"incompatible graph layouts are rejected");
+  *invalid=*valid;invalid->entries[0].graph.nodes[0].kind=99;expectRejected(*invalid,"invalid effects are rejected even with a correct checksum");
+  blob(*valid);auto& bytes=testStorage[g_searchMaterialStorage];bytes.back()^=1;resetRuntime();LoadSearchMaterialStorage();Check(g_searchSavedMaterials.count==0,"corrupted cache bytes are rejected");
+  blob(*valid);testStorage[g_searchMaterialStorage].pop_back();resetRuntime();LoadSearchMaterialStorage();Check(g_searchSavedMaterials.count==0,"truncated cache records are rejected");
+  blob(*valid);resetRuntime();LoadSearchMaterialStorage();clearLive();
+  g_searchSavedMaterials.entries[0].weak^=2;
+  Check(CaptureSearchBrush(warmXaml).kind==4,"a different weak generation cannot reuse an owner's address");
+  g_searchSavedMaterials=*valid;warm->FallbackColor(winrt::Windows::UI::Color{255,17,23,41});
+  Check(CaptureSearchBrush(warmXaml).kind==4,"a changed public fallback color invalidates saved appearance");
+  warm->FallbackColor(winrt::Windows::UI::Color{});g_searchSavedMaterials=*valid;warm->hideProtected=false;
+  auto previousNative=warm->Current();g_searchMaterialCapture=false;warm->OnDisconnected();warm->OnConnected();g_searchMaterialCapture=true;clearLive();previousNative=nullptr;
+  Check(CaptureSearchBrush(warmXaml).kind==4,"a changed readable composition identity cannot reuse an older graph");
+  g_searchSavedMaterials=*valid;g_searchSavedMaterialsDirty=true;storageWritable=false;SaveSearchMaterialStorage();
+  Check(g_searchSavedMaterialsDirty,"failed storage writes leave recovery retryable");storageWritable=true;SaveSearchMaterialStorage();
+  Check(!g_searchSavedMaterialsDirty,"successful storage writes clear the dirty flag");
+  std::vector<winrt::com_ptr<TestMaterialBrush>> owners;g_searchSavedMaterials.count=0;
+  for(int i=0;i<40;++i){auto owner=winrt::make_self<TestMaterialBrush>();owner->Attach(warm->Current());RememberSearchMaterial(owner.as<wuxm::XamlCompositionBrushBase>(),warm->Current(),original.graph);owners.push_back(owner);}
+  Check(g_searchSavedMaterials.count==32,"continuity storage has a strict record bound");
+  const auto count=g_searchSavedMaterials.count;ForgetSavedSearchMaterial(owners.back().as<wf::IUnknown>(),true);
+  Check(g_searchSavedMaterials.count==count-1,"observed XAML creation invalidates an old identity record");
+  ForgetSavedSearchMaterial(warm->Current(),false);
+  Check(g_searchSavedMaterials.count==0,"observed native creation invalidates matching saved compositions");
+  warm->OnDisconnected();warm=nullptr;warmXaml=nullptr;owners.clear();testStorage.clear();resetRuntime();
  }
  brush=nullptr;factory=nullptr;copiedBrush=nullptr;copiedFactory=nullptr;
  std::thread stopOnEngineThread([]{winrt::init_apartment(winrt::apartment_type::multi_threaded);StopSearchMaterialCapture();winrt::uninit_apartment();});stopOnEngineThread.join();Check(g_searchMaterialFactories.empty()&&g_searchMaterialBrushes.empty()&&g_searchMaterialXaml.empty(),"engine-thread shutdown clears definitions without owning factory or brush references");

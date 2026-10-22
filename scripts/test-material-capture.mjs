@@ -12,10 +12,9 @@ function part(first,last){const a=source.indexOf(first),b=source.indexOf(last,a+
 const data=part('// Bounded, pointer-free snapshots','struct SearchSurfaceData');
 const effects=part('// Small Direct2D effect graph for Styler glass:','SearchSurfaceData CaptureLiveSurface(');
 const recreate=part('wf::IInspectable RecreateSearchEffectValue','struct SearchGlassBrush :');
-const shutdown=part('static void DrainSearchXamlThreadMessages()', 'static DWORD WINAPI ExplorerHelperThreadProc');
 const colors='uint32_t SearchPackColor(winrt::Windows::UI::Color c){return (uint32_t(c.A)<<24)|(uint32_t(c.R)<<16)|(uint32_t(c.G)<<8)|c.B;}';
 const cpp=path.join(output,'material-capture.cpp');
-fs.writeFileSync(cpp,fs.readFileSync(path.join(root,'tests/material-capture.cpp'),'utf8').replace('// PRODUCTION',data+'\n'+colors+'\n'+shutdown+'\n'+effects+'\n'+recreate));
+fs.writeFileSync(cpp,fs.readFileSync(path.join(root,'tests/material-capture.cpp'),'utf8').replace('// PRODUCTION',data+'\n'+colors+'\n'+effects+'\n'+recreate));
 const manifest=path.join(output,'test.manifest');
 fs.writeFileSync(manifest,'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1"><assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="StartEverything.MaterialTests" type="win32"/><compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application><maxversiontested Id="10.0.22621.0"/><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/></application></compatibility></assembly>');
 const embed=path.join(output,'embed-manifest.cpp');
@@ -35,9 +34,9 @@ process.stdout.write((result.stdout||'').split('\n').filter(line=>/FAIL|ERROR|FA
 if(result.stderr)process.stderr.write(result.stderr);
 if(result.error)process.stderr.write(String(result.error));
 if(result.status!==0)process.exit(result.status??1);
-const exitTest=spawnSync(exe,['--exit-live-cache'],{...options,timeout:30000});
-fs.writeFileSync(path.join(output,'process-exit.log'),(exitTest.stdout||'')+(exitTest.stderr||''));
-process.stdout.write(exitTest.stdout||'');
-if(exitTest.stderr)process.stderr.write(exitTest.stderr);
-if(exitTest.error)process.stderr.write(String(exitTest.error));
-process.exit(exitTest.status??1);
+const shutdown=spawnSync(exe,['--exit-live-cache'],{...options,timeout:30000});
+fs.writeFileSync(path.join(output,'process-exit.log'),(shutdown.stdout||'')+(shutdown.stderr||''));
+process.stdout.write(shutdown.stdout||'');
+if(shutdown.stderr)process.stderr.write(shutdown.stderr);
+if(shutdown.error)process.stderr.write(String(shutdown.error));
+process.exit(shutdown.status??1);
