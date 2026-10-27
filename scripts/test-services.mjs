@@ -24,4 +24,9 @@ const built=spawnSync('C:/Program Files/Windhawk/Compiler/bin/clang++.exe',['--t
 if(built.status!==0){process.stderr.write((built.stdout||'')+(built.stderr||String(built.error)));process.exit(built.status??1);}
 const ran=spawnSync(exe,[],{...options,timeout:30000});
 fs.writeFileSync(path.join(output,'results.log'),(ran.stdout||'')+(ran.stderr||'')+String(ran.error||''));
-process.stdout.write(ran.stdout||'');process.stderr.write(ran.stderr||'');if(ran.error)process.stderr.write(String(ran.error));process.exit(ran.status??1);
+process.stdout.write(ran.stdout||'');process.stderr.write(ran.stderr||'');if(ran.error)process.stderr.write(String(ran.error));
+if(ran.status!==0)process.exit(ran.status??1);
+const shutdown=spawnSync(exe,['--exit-with-idle-worker'],{...options,timeout:5000});
+fs.writeFileSync(path.join(output,'shutdown-results.log'),(shutdown.stdout||'')+(shutdown.stderr||'')+String(shutdown.error||''));
+if(shutdown.status!==0){process.stderr.write((shutdown.stdout||'')+(shutdown.stderr||String(shutdown.error||'')));process.exit(shutdown.status??1);}
+process.stdout.write('PASS: process exit with a joinable service worker does not terminate the host\n');

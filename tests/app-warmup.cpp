@@ -24,10 +24,17 @@ std::atomic<int> rebuilds{0};
 struct App {std::wstring name=L"test";bool isSetting=false;void* pidl=nullptr;};
 const std::wstring& IconIdentity(const App& app){return app.name;}
 struct Index {
-    bool Rebuild(){++rebuilds;std::unique_lock lock(gate);entered=true;gateWake.notify_all();gateWake.wait(lock,[]{return !blocked;});if(throws)throw 1;return !fail;}
+    bool Rebuild(const std::atomic<bool>* cancel = nullptr){
+        ++rebuilds;std::unique_lock lock(gate);entered=true;gateWake.notify_all();
+        while(blocked){
+            if(cancel && cancel->load())return false;
+            gateWake.wait_for(lock,5ms);
+        }
+        if(throws)throw 1;return !fail;
+    }
     size_t Count()const{return 42;}
     const App* At(size_t)const{return nullptr;}
-    std::shared_ptr<Index> Refreshed(bool)const{auto next=std::make_shared<Index>();return next->Rebuild()?next:nullptr;}
+    std::shared_ptr<Index> Refreshed(bool, const std::atomic<bool>* cancel = nullptr)const{auto next=std::make_shared<Index>();return next->Rebuild(cancel)?next:nullptr;}
 };
 // PRODUCTION_WARMUP
 }
@@ -101,8 +108,8 @@ int main(){
     Check(!warm.Take().index,"provider exception is contained and wakes the waiting search worker");warm.Stop();
     Reset(true);Check(warm.Start(),"unload test starts background work without creating a UI");Entered();
     std::atomic<bool> stopped{false};std::thread stop([&]{warm.Stop();stopped=true;});
-    Sleep(10);Check(!stopped,"unload joins in-flight native catalog work instead of abandoning its thread");
-    Release();stop.join();Check(stopped && !warm.Take().index,"unload discards unfinished catalog ownership cleanly");
+    stop.join();Check(stopped && !warm.Take().index,"unload cancels a cooperative catalog provider and discards unfinished ownership");
+    Release();
     Reset();
     std::mutex iconMutex;std::condition_variable iconWake;
     bool iconEntered=false,releaseIcon=false;std::atomic<int> iconPublished=0;

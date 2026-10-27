@@ -42,6 +42,14 @@ int checks=0;
 void Check(bool ok,const char* what){if(!ok){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);}++checks;}
 int main(int argc,char** argv){
     i18n::Load(L"en");
+    if (argc > 1 && std::string(argv[1]) == "--exit-with-idle-worker") {
+        // No SCM request or operation is made: the worker waits while hidden.
+        // Returning without controlled unload exercises process-shutdown CRT
+        // destruction. A joinable global std::thread without no_destroy aborts.
+        services::Schedule(L"/services", L"", 42, 20);
+        Check(services::g_thread && services::g_thread->joinable(), "shutdown fixture owns a live worker");
+        return 0;
+    }
     if(argc>1 && std::string(argv[1])=="--fixture-check"){
         wchar_t path[MAX_PATH]{};GetModuleFileNameW(nullptr,path,MAX_PATH);
         const auto exe=std::wstring(path);const auto binary=exe.substr(0,exe.find_last_of(L"\\/")+1)+L"service-fixture.exe";

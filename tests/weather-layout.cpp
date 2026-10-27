@@ -93,7 +93,10 @@ int main(){
                 }
                 SpeedView measured;measured.phase=SpeedView::Phase::Download;measured.download=80.1;measured.progress=10;
                 UpdateSpeedCard(ui,measured);
-                Check(ui.reading.Text()==L"80.1" && ui.unit.Text()==L"\u2193 Mbps","meter shows download speed in Mbps");
+                Check(ui.reading.Text()==L"80.1" && ui.unit.Text()==L"\u2193 Mbps\n10.0 MB/s","meter shows download speed in Mbps");
+                Check(ui.downloadBytes.Text()==L"10.0 MB/s" && ui.uploadBytes.Text()==L"\u2014","both summaries show byte rates and unavailable uploads stay empty");
+                Check(SpeedByteRate(0.8)==L"100.0 kB/s" && SpeedByteRate(8)==L"1.0 MB/s" && SpeedByteRate(8000)==L"1.0 GB/s","byte units adapt at decimal kilo, mega and giga boundaries");
+                Check(SpeedByteRate(0)==L"0.00 kB/s" && SpeedByteRate(-1)==L"\u2014" && SpeedByteRate(std::numeric_limits<double>::infinity())==L"\u2014","zero and unavailable byte rates are formatted safely");
                 const auto endpoint=[&]{return ui.arc.Data().as<wuxm::PathGeometry>().Figures().GetAt(0).Segments().GetAt(0).as<wuxm::ArcSegment>().Point();};
                 const auto before=endpoint();measured.progress=99;UpdateSpeedCard(ui,measured);
                 Check(endpoint().X==before.X && endpoint().Y==before.Y,"completion progress cannot move the speed meter");
@@ -103,7 +106,7 @@ int main(){
                 measured.phase=SpeedView::Phase::Upload;measured.upload=-1;UpdateSpeedCard(ui,measured);
                 Check(ui.arc.Visibility()==wux::Visibility::Collapsed && ui.reading.Text()==L"\u2014","upload starts with an empty meter rather than the download reading");
                 measured.upload=20.2;UpdateSpeedCard(ui,measured);
-                Check(ui.reading.Text()==L"20.2" && ui.unit.Text()==L"\u2191 Mbps" && ui.meterMaximum==scale,"upload uses its speed on the same scale");
+                Check(ui.reading.Text()==L"20.2" && ui.unit.Text()==L"\u2191 Mbps\n2.5 MB/s" && ui.meterMaximum==scale,"upload uses its speed on the same scale");
                 Check(std::wstring(ui.download.Text()).find(L"40.0")!=std::wstring::npos,"completed download remains visible during upload");
                 measured.phase=SpeedView::Phase::Done;measured.progress=100;UpdateSpeedCard(ui,measured);
                 Check(ui.reading.Text()==L"20.2" && !ui.arc.Data().as<wuxm::PathGeometry>().Figures().GetAt(0).Segments().GetAt(0).as<wuxm::ArcSegment>().IsLargeArc(),"completion keeps the measured upload instead of filling to 100 percent");
@@ -122,6 +125,7 @@ int main(){
                 Check(ui.meterAnimating && ui.meterSpeed==0 && ui.needleRotation.Angle()==-135,"a new speed eases out from the displayed value rather than jumping");
                 AdvanceSpeedMeter(ui,began+125);
                 Check(ui.meterSpeed>0 && ui.meterSpeed<100 && ui.reading.Text()==L"87.5","the numeric reading animates with the gauge");
+                Check(std::wstring(ui.unit.Text()).ends_with(SpeedByteRate(ui.meterSpeed)),"byte reading follows the animated Mbps value on each frame");
                 Check(std::abs(ui.needleRotation.Angle()-(-135+270*SpeedMeterFraction(ui.meterSpeed,ui.meterMaximum)))<0.001,"needle and animated reading agree on the nonlinear scale");
                 const auto point=SpeedMeterPoint(ui.meterFraction,118),drawn=ui.meterArc.Point();
                 Check(std::abs(point.X-drawn.X)<0.001 && std::abs(point.Y-drawn.Y)<0.001,"colored arc follows the needle on each animation frame");

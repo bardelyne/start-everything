@@ -48,7 +48,11 @@ namespace native {void AddAliases(std::vector<std::wstring>& values,const std::w
 }
 // PRODUCTION_CATALOG
 // PRODUCTION_UNINSTALL
+DWORD catalogAttributeProbes = 0;
+DWORD CatalogAttributes(LPCWSTR path) { ++catalogAttributeProbes; return GetFileAttributesW(path); }
+#define GetFileAttributesW CatalogAttributes
 // PRODUCTION_APPS
+#undef GetFileAttributesW
 // PRODUCTION_PACKAGE_ICON
 int checks=0;
 void Check(bool ok,const char* what){if(!ok){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);}++checks;}
@@ -59,7 +63,16 @@ std::wstring VisualName(const std::string& xml){
     auto name=installed::VisualName(stream,L"Test.Package",L"Test.Package_1.0.0.0_x64__1234567890123");stream->Release();return name;
 }
 int main(){
-    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    // Package-icon decoding must remain safe when its caller is an STA.
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    Check(!apps::LocalTargetExists(L"\\\\offline.invalid\\share\\app.exe") &&
+          !apps::LocalTargetExists(L"ms-settings:display") &&
+          !apps::LocalTargetExists(L"shell:AppsFolder") && catalogAttributeProbes == 0,
+          "catalog rejects remote and shell targets before any file-existence probe");
+    std::atomic<bool> cancelled{true};
+    apps::Index cancelledIndex;
+    Check(!cancelledIndex.Rebuild(&cancelled) && !cancelledIndex.Refreshed(true, &cancelled),
+          "cancelled catalog rebuild and replacement return before enumerating the shell");
     // An isolated volatile test key, outside Windows' real Uninstall catalog.
     // Only parsing/availability is tested; no removal command is executed.
     {

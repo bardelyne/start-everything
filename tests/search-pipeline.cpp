@@ -94,7 +94,7 @@ struct Match { const App* app; int score = 0, rank = 0; };
 class Index {
     std::vector<App> apps;
 public:
-    bool Rebuild() {
+    bool Rebuild(const std::atomic<bool>* = nullptr) {
         const auto build=++rebuilds;
         if(build>1){std::unique_lock lock(providerMutex);rebuildEntered=true;providerWake.notify_all();providerWake.wait(lock,[]{return !blockRebuild;});}
         apps.clear();
@@ -109,7 +109,7 @@ public:
         if(includeGamma){App added;added.name=L"Gamma";added.nameLower=L"gamma";added.targetPath=L"Gamma.exe";apps.push_back(std::move(added));}
         return true;
     }
-    std::shared_ptr<Index> Refreshed(bool)const{auto next=std::make_shared<Index>();return next->Rebuild()?next:nullptr;}
+    std::shared_ptr<Index> Refreshed(bool, const std::atomic<bool>* = nullptr)const{auto next=std::make_shared<Index>();return next->Rebuild()?next:nullptr;}
     size_t Count() const { return apps.size(); }
     const App* At(size_t i) const { return i < apps.size() ? &apps[i] : nullptr; }
     std::vector<Match> Suggest(size_t, const UsageCounts*) { return {{&apps[0]}, {&apps[1]}}; }
@@ -124,7 +124,8 @@ UsageCounts LoadUsage() { return {}; }
 void SaveUsage(const UsageCounts&) {}
 void RecordUsage(UsageCounts*, const std::wstring&) {}
 }
-apps::WarmIndex g_appsWarmup;
+std::optional<apps::WarmIndex> g_appsWarmup;
+std::optional<std::thread> g_searchThread;
 bool FetchAppIcon(const apps::App*, int, std::vector<BYTE>* pixels) {
     ++iconFetches;
     {std::unique_lock lock(providerMutex);iconEntered=true;providerWake.notify_all();providerWake.wait(lock,[]{return !blockIcons;});}
@@ -264,10 +265,10 @@ int main() {
     Row richSelection;richSelection.sectionTitle=L"Weather";
     Check(RefreshedAppSelection(L"/weather",L"/weather",{richSelection,richSelection},{richSelection},1,false)==0,"live utility rows retain their bounded selection");
     StartAppsWarmup();
-    Check(g_appsWarmup.Start(),"catalog warmup starts independently of any search query");
+    Check(g_appsWarmup->Start(),"catalog warmup starts independently of any search query");
     const auto warmDeadline=GetTickCount64()+2000;
-    while(!g_appsWarmup.BuiltAt() && GetTickCount64()<warmDeadline)Sleep(1);
-    Check(g_appsWarmup.BuiltAt()!=0 && apps::rebuilds==1,"catalog is ready in the background before search starts");
+    while(!g_appsWarmup->BuiltAt() && GetTickCount64()<warmDeadline)Sleep(1);
+    Check(g_appsWarmup->BuiltAt()!=0 && apps::rebuilds==1,"catalog is ready in the background before search starts");
     Row installed;installed.installedOnly=true;installed.openPath=L"ms-settings:appsfeatures";
     Check(!IsSettingsResult(installed),"installed-only management destination must never choose a Settings gear icon");
     Row setting;setting.isSetting=true;setting.openPath=L"ms-settings:display";
@@ -376,7 +377,7 @@ int main() {
         Check(launched == L"Alpha", "launch identity survives a replacement match list");
     }
     {std::lock_guard lock(providerMutex);blockRebuild=true;rebuildEntered=false;}
-    g_appsWarmup.Refresh(true);
+    g_appsWarmup->Refresh(true);
     {std::unique_lock lock(providerMutex);Check(providerWake.wait_for(lock,2s,[]{return rebuildEntered;}),"catalog refresh is deliberately blocked");}
     const auto whileRefreshing=Queue(L"Gamma");
     {std::unique_lock lock(observedMutex);Check(observedWake.wait_for(lock,100ms,[&]{return seenApps.back().revision>=whileRefreshing;}),"typing stays responsive while the catalog is rebuilding");Check(seenApps.back().rows.empty(),"the old snapshot stays usable until a complete replacement is ready");}
@@ -432,9 +433,9 @@ int main() {
     Check(Apps(hardwareRevision) && Files(hardwareRevision),"hardware command publishes without waiting for file results");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows[0].title==L"hardware" && seenFiles.back().rows.empty(),"hardware cards replace apps without querying files");}
     Check(hardware::requests.load()==1,"hardware collection starts once for a valid command");
-    const auto utilityCatalogVersion=g_appsWarmup.Version();g_appsWarmup.Refresh();
-    const auto utilityWait=GetTickCount64();while(g_appsWarmup.Version()==utilityCatalogVersion && GetTickCount64()-utilityWait<2000)Sleep(1);
-    Check(g_appsWarmup.Version()>utilityCatalogVersion,"catalog replacement can complete during a live utility command");
+    const auto utilityCatalogVersion=g_appsWarmup->Version();g_appsWarmup->Refresh();
+    const auto utilityWait=GetTickCount64();while(g_appsWarmup->Version()==utilityCatalogVersion && GetTickCount64()-utilityWait<2000)Sleep(1);
+    Check(g_appsWarmup->Version()>utilityCatalogVersion,"catalog replacement can complete during a live utility command");
     Sleep(100);
     {std::scoped_lock lock(g_queryMutex,g_resultsMutex);Check(g_queryRevision==hardwareRevision && hardware::requests.load()==1 && g_appRows[0].title==L"hardware","a silent catalog change never restarts the hardware monitor or steals its result");}
     const auto usageArgs=Queue(L"/usage unexpected");
@@ -475,7 +476,13 @@ int main() {
     }
     g_queryWake.notify_all(); g_fileQueryWake.notify_all();
     apps.join(); files.join();
-    g_appsWarmup.Stop();
+    g_searchThread.emplace([] {});
+    StopAppsWarmup();
+    Check(g_appsWarmup.has_value(), "warmup ownership survives until the matching thread is joined");
+    g_searchThread->join();
+    g_searchThread.reset();
+    StopAppsWarmup();
+    Check(!g_appsWarmup, "controlled unload destroys retained warmup buffers after the last consumer");
     Check(!PublishAppResults(rapid, L"Beta", {}), "no app publication after shutdown");
     Check(!PublishFileResults(rapid, {}, 0), "no file publication after shutdown");
     std::printf("PASS: %d search pipeline checks; apps stayed responsive with blocked files\n", checks);

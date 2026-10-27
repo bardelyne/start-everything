@@ -17,7 +17,7 @@ let code=fixture
  .replace('// PRODUCTION_CATALOG',part('namespace installed {','}  // namespace installed')+'}\n')
  .replace('// PRODUCTION_UNINSTALL',part('namespace uninstall {','}  // namespace uninstall')+'}\n')
  .replace('// PRODUCTION_APPS',part('namespace apps {','}  // namespace apps')+'}\n')
- .replace('// PRODUCTION_PACKAGE_ICON',part('namespace icons {','inline bool BitmapToBgra(')+'}\n'+part('bool FetchInstalledPackageIcon(','bool FetchAppIcon('));
+ .replace('// PRODUCTION_PACKAGE_ICON',part('namespace icons {','inline bool BitmapToBgra(')+'}\n'+'namespace preview {\n'+part('template <typename F>\ninline void RunInMta(', '// Use Windows\' built-in codecs')+'}\n'+part('bool FetchInstalledPackageIconMta(','bool FetchAppIcon('));
 const cpp=path.join(output,'installed-apps.cpp'),exe=path.join(output,'installed-apps.exe');fs.writeFileSync(cpp,code);
 const options={encoding:'utf8',windowsHide:true,env:{...process.env,TEMP:output,TMP:output},timeout:120000};
 const compiler='C:/Program Files/Windhawk/Compiler/bin/clang++.exe';

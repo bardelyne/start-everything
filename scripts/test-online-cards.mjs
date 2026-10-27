@@ -13,6 +13,7 @@ function part(first, last) {
     return source.slice(start, end);
 }
 const fragments = {
+    SPEED_FORMAT: part('std::wstring SpeedMeterNumber(', 'constexpr ULONGLONG kSpeedMeterEaseMs'),
     COMMANDS: part('namespace commands {', '}  // namespace commands') + '}\n',
     I18N: part('namespace i18n {', '// ==/StartEverythingLocalization=='),
     TOOLS: 'namespace tools {\n' + part('inline std::wstring ToLower(const std::wstring& str)', '// 4. Math Expression Evaluator').split('// ---------------------------------------------------------------------------')[0] + '\n}\n',

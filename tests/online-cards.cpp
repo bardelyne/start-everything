@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <roapi.h>
 #include <winhttp.h>
+#include <winrt/Windows.Networking.Connectivity.h>
 #include <bcrypt.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -43,6 +44,7 @@ std::optional<std::thread> g_onlineThread;
 std::atomic<int> renders{0};
 void RequestRender() { ++renders; }
 void Wh_Log(const wchar_t*, ...) {}
+// PRODUCTION_SPEED_FORMAT
 // PRODUCTION_ONLINE
 std::vector<Row> g_currentAppRows, g_currentFileRows;
 uint64_t g_shownAppsRevision = 0, g_shownFilesRevision = 0, g_shownAppsContentRevision = 0;
@@ -288,6 +290,57 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 64; ++i) online::Store(L"key"+std::to_wstring(i),{rate,now+60000,now+static_cast<ULONGLONG>(i)});
     Check(online::g_cache.size() == 32, "online result cache bounded");
 
+    online::g_cache.clear();
+    const auto preview = online::BeginBatch({currency});
+    Check(preview.fetch && preview.rows.size() == 1 && preview.rows.front().onlinePending && preview.rows.front().infoOnly,
+          "typing shows a loading card without requiring Enter");
+    online::Schedule({disabled});
+    online::Schedule({speed});
+    Check(!g_onlineThread && !online::g_request, "offline cards and an unstarted speed test cannot create an HTTP worker");
+    std::atomic<int> forbiddenCalls{0};
+    { std::lock_guard lock(g_queryMutex); g_queryRevision = disabled.revision; online::g_request = online::Batch{disabled}; }
+    std::thread guardWorker([&] {
+        const auto hr = RoInitialize(RO_INIT_MULTITHREADED);
+        online::Run([&](const auto&, const auto&) { ++forbiddenCalls; return Json(L"{}"); });
+        if (SUCCEEDED(hr)) RoUninitialize();
+    });
+    for (int i = 0; i < 100; ++i) {
+        { std::lock_guard lock(g_queryMutex); if (!online::g_request) break; }
+        std::this_thread::sleep_for(1ms);
+    }
+    { std::lock_guard lock(g_queryMutex); g_searchQuit = true; }
+    online::Wake(); guardWorker.join();
+    Check(forbiddenCalls == 0, "worker independently rejects offline requests");
+
+    // The worker must settle typing before HTTP, replace obsolete lookups,
+    // and fetch the final command without any UI activation.
+    auto automatic = currency; automatic.revision = 23;
+    { std::lock_guard lock(g_queryMutex); g_searchQuit = false; g_queryRevision = 23; online::g_request = online::Batch{automatic}; }
+    std::atomic<int> automaticCalls{0};
+    std::wstring automaticPath;
+    std::thread automaticWorker([&] {
+        const auto hr = RoInitialize(RO_INIT_MULTITHREADED);
+        online::Run([&](const std::wstring&, const std::wstring& path) {
+            automaticPath = path; ++automaticCalls;
+            return Json(LR"({"base":"USD","quote":"GBP","date":"2026-10-25","rate":0.8})");
+        });
+        if (SUCCEEDED(hr)) RoUninitialize();
+    });
+    std::this_thread::sleep_for(100ms);
+    Check(automaticCalls == 0, "typing pause shorter than debounce cannot send HTTP");
+    automatic = Parse(L"/money 100 USD > GBP"); automatic.revision = 24;
+    const auto settledAt = std::chrono::steady_clock::now();
+    { std::lock_guard lock(g_queryMutex); g_queryRevision = 24; online::g_request = online::Batch{automatic}; }
+    online::Wake();
+    std::this_thread::sleep_for(100ms);
+    Check(automaticCalls == 0, "more typing restarts the settle interval");
+    for (int i = 0; i < 150 && automaticCalls == 0; ++i) std::this_thread::sleep_for(10ms);
+    Check(automaticCalls == 1, "settled valid command fetches automatically without Enter");
+    Check(std::chrono::steady_clock::now()-settledAt >= 400ms, "final lookup waits for a quiet typing interval");
+    { std::lock_guard lock(g_queryMutex); g_searchQuit = true; }
+    online::Wake(); automaticWorker.join();
+    Check(automaticPath.ends_with(L"/USD/GBP"), "only the final currency pair reaches the provider");
+    g_searchQuit = false;
     g_queryRevision = 1;
     auto loading = online::Notice(currency,L"Currency",L"Loading",true);
     Check(PublishAppResults(1,L"/money 100 USD EUR",{loading}), "initial online placeholder publishes");
@@ -327,7 +380,7 @@ int main(int argc, char** argv) {
     // completed card without waiting for the rest of the list.
     online::g_cache.clear(); renders=0;
     auto listRoot=Parse(L"/money"); listRoot.revision=4;
-    const auto list=online::Expand(listRoot,{}, {}, {L"100 USD EUR",L"200 USD EUR"}, {});
+    auto list=online::Expand(listRoot,{}, {}, {L"100 USD EUR",L"200 USD EUR"}, {});
     {std::lock_guard lock(g_queryMutex);g_searchQuit=false;g_queryRevision=4;online::g_request=list;}
     std::atomic<int> pairCalls{0};
     std::thread batchWorker([&]{
@@ -341,7 +394,7 @@ int main(int argc, char** argv) {
     Check(g_appRows.size()==2 && g_appRows[0].copyText==L"90" && g_appRows[1].copyText==L"180", "saved list results retain order and amounts");
     online::g_cache.clear(); renders=0;
     auto mixedRoot=Parse(L"/money"); mixedRoot.revision=5;
-    const auto mixed=online::Expand(mixedRoot,{}, {}, {L"EUR",L"XYZ",L"GBP"}, {});
+    auto mixed=online::Expand(mixedRoot,{}, {}, {L"EUR",L"XYZ",L"GBP"}, {});
     {std::lock_guard lock(g_queryMutex);g_searchQuit=false;g_queryRevision=5;online::g_request=mixed;}
     std::thread mixedWorker([&]{
         const auto hr=RoInitialize(RO_INIT_MULTITHREADED);
@@ -398,6 +451,27 @@ int main(int argc, char** argv) {
     {std::lock_guard lock(g_queryMutex);g_searchQuit=true;}online::Wake();cancelWorker.join();
     Check(g_appRows[0].speed->phase==SpeedView::Phase::Stopped && !online::g_speedBusy,"stop cancels and keeps a restartable card");
     Check(online::g_lastSpeed->download==80.1,"cancelled measurement does not overwrite last complete result");
+    auto hiddenRequest=speed;hiddenRequest.revision=70;hiddenRequest.speedId=20;hiddenRequest.runSpeed=true;
+    {std::lock_guard lock(g_queryMutex);g_searchQuit=false;g_queryRevision=online::g_speedRevision=70;online::g_speedId=20;online::g_speedBusy=true;online::g_request=online::Batch{hiddenRequest};}
+    std::atomic<bool> hiddenEntered{false}, hiddenCancelled{false};
+    std::thread hiddenWorker([&]{
+        const auto hr=RoInitialize(RO_INIT_MULTITHREADED);
+        online::Run([](const auto&,const auto&)->online::Json{throw std::runtime_error("not expected");},
+          [&](const online::Request& request,const online::SpeedProgress& progress){
+            SpeedView value;value.phase=SpeedView::Phase::Download;value.progress=30;progress(value);hiddenEntered=true;
+            while(online::SpeedCurrent(request))std::this_thread::sleep_for(5ms);
+            hiddenCancelled=true;value.phase=SpeedView::Phase::Done;return value;
+          });
+        if(SUCCEEDED(hr))RoUninitialize();
+    });
+    for(int i=0;i<150 && !hiddenEntered;++i)std::this_thread::sleep_for(10ms);
+    Check(hiddenEntered,"hide test reaches an active speed test");
+    {std::lock_guard lock(g_queryMutex);++g_queryRevision;} // closing clears the query
+    online::Wake();
+    for(int i=0;i<150 && !hiddenCancelled;++i)std::this_thread::sleep_for(10ms);
+    {std::lock_guard lock(g_queryMutex);g_searchQuit=true;}online::Wake();hiddenWorker.join();
+    Check(hiddenCancelled && !online::g_speedBusy,"clearing the query on close cancels the speed test without pressing Stop");
+    Check(online::g_lastSpeed->download==80.1,"closing keeps the last completed measurement, not the incomplete test");
     auto parallelRequest=speed;parallelRequest.revision=8;parallelRequest.speedId=3;parallelRequest.runSpeed=true;
     {std::lock_guard lock(g_queryMutex);g_searchQuit=false;g_queryRevision=online::g_speedRevision=8;online::g_speedId=3;online::g_speedBusy=true;}
     std::atomic<int> concurrent{0},peak{0};
@@ -414,6 +488,12 @@ int main(int argc, char** argv) {
     parallelView.phase=SpeedView::Phase::Upload;parallelView.progress=55;
     auto upload=online::MeasureDirection(parallelRequest,true,parallelView,[](const auto&){},1000000,0.2,fakeTransfer);
     Check(upload.bytes==996000 && upload.limited && upload.mbps>0,"upload counts acknowledged samples within shared budget");
+    for (bool sending : {false, true}) {
+        const auto early = online::MeasureDirection(parallelRequest, sending, parallelView,
+            [](const auto&) {}, 1000000, 0.2, fakeTransfer, true);
+        Check(early.limited && early.bytes <= 1000000 && early.mbps > 0 && early.seconds > 0,
+              "a cap reached during grace returns valid limited throughput instead of an error");
+    }
     Check(online::kSpeedTestSeconds==15.0,"adaptive tests retain a bounded maximum measurement window");
     Check(online::SpeedTimeBonus(0,1)==0 && online::SpeedTimeBonus(10000000,1)==2,"adaptive timing leaves slow transfers time and limits fast-test shortening");
     Check(online::SpeedTimeBonus(4000000,0.2)==0.2 && online::SpeedTimeBonus(4000000,0.1)*2==online::SpeedTimeBonus(4000000,0.2),"adaptive timing is independent of UI update frequency");
@@ -508,6 +588,26 @@ int main(int argc, char** argv) {
     const auto adapted=online::MeasureDirection(parallelRequest,true,parallelView,[](const auto&){},0,0.2,bodyLimited);
     Check(adapted.mbps>0 && rejectedBodies>0 && rejectedBodies<=32,"upload adapts to server body limits with bounded retries");
     Check(online::g_speedUploadLimits[0]<=512*1024,"learned upload limits are reused on subsequent tests");
+
+    online::g_speedUploadLimits[0] = 20 * 1024 * 1024;
+    constexpr size_t runBudget = 8 * 1024 * 1024;
+    std::atomic<size_t> attemptedPayload{0};
+    const auto rejectedPayload = [&](auto& http, const auto& request, bool sending, size_t length,
+                                     const auto& progress, const auto& active) {
+        attemptedPayload += length;
+        if (sending && length > 128 * 1024) {
+            progress(length);  // a server can reject a body after it was sent
+            throw online::SpeedHttpError(413);
+        }
+        return fakeTransfer(http, request, sending, length, progress, active);
+    };
+    const auto bounded = online::MeasureDirection(parallelRequest, true, parallelView,
+        [](const auto&) {}, runBudget, 1, rejectedPayload);
+    Check(bounded.mbps > 0 && bounded.limited && attemptedPayload <= runBudget,
+          "rejected uploads and every concurrent warmup/body share one nonrefundable payload cap");
+    Check(online::kDownloadBudget + online::kUploadBudget == 384 * 1024 * 1024 &&
+          online::kMeteredDownloadBudget + online::kMeteredUploadBudget == 96 * 1024 * 1024,
+          "production runs have finite regular and reduced metered payload caps");
     online::g_speedUploadLimits[0]=20*1024*1024;
     const auto largerBodies=[&](auto& http,const auto& request,bool upload,size_t length,const auto& progress,const auto& active){
         if(upload && length>8*1024*1024)throw online::SpeedHttpError(413);
