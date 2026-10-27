@@ -2,7 +2,7 @@
 
 A native replacement for Windows 11 search, powered by voidtools Everything. Press Win+S, click the taskbar search icon, or start typing in Start to search files, apps, and settings in a separate window styled after your Start menu. Windows Search stays out of the way: its window is never shown, and it cannot start the Edge WebView2 process behind its Bing-backed search panel.
 
-Version **2.0** introduces a separate Windows 11 search window, with Start appearance copying, app suggestions, and custom commands.
+Version **2.1** includes independent Apps-panel updates, Quick Tools cards, services management, and searchable installed-only programs with friendly names and package icons.
 
 ![Everything & Power Tools in the Start Menu](https://raw.githubusercontent.com/bardelyne/start-everything/main/img.png)
 
@@ -26,6 +26,13 @@ Version **2.0** introduces a separate Windows 11 search window, with Start appea
 
 - **Instant voidtools Everything IPC**: Queries Everything directly through its Win32 IPC interface for fast results across millions of files. The mod keeps no index of its own.
 - **Smart Apps and Windows Settings Search**: Instant fuzzy matching across Desktop applications, Microsoft Store / UWP packages, Windows Settings, Control Panel applets, and Windows tools. Settings names and keywords come from Windows' own local search database and navigation metadata, cached in memory and refreshed with the app index when the Windows catalog changes. Additional Windows tools stay available, and an audited built-in list is used if native data is missing or incompatible. No Windows Search indexing service or extra database software is required. Shell icons are rendered at your display's exact pixel size.
+- **Installed-only Programs**: Search also includes named installed programs and user packages, including entries without registered shortcuts, such as suites, runtimes and language packs. An **Installed app · No launcher found** label distinguishes them from Settings results. Package entries use their installed logos and friendlier application names when available; their original technical names remain searchable. Entries without an icon use Windows' default executable icon, while Settings results use a gear. Right-click for **Open file location** and **Copy path** when Windows provides an existing installation folder, plus **Copy name**. **Uninstall** uses that exact program registration or package and asks for confirmation; **Manage in Installed apps** appears only when direct removal is unavailable. Selecting an entry without a launcher opens its installation folder when known; otherwise it opens these actions. When a shortcut is missing, an executable can still be recognized by an exact product/filename match in its local installation folder. Detection requires a unique Windows GUI executable with matching version metadata; installers, uninstallers and ambiguous candidates are not used. Other entries retain the **No launcher found** label, which does not claim the program is incapable of running. Installation events invalidate cached metadata; typing uses the current in-memory catalog. Hidden system components, framework/resource packages and update-only registrations are excluded. Matching launchable entries stay merged, with their installed product name available as a search alias. Differently named shortcuts are also matched by their executable name and registered installation folder; the real shortcut keeps its icon, activation target and arguments. Distinct executables or installations are kept separate.
+- **Reusable Apps Cards**: Ordinary app, Settings and installed-only results reuse attached card slots as you type. Text, icons and menu targets update in place; unused slots collapse. The pool grows as needed up to **Max App Results** and resets when settings change. Rich Quick Tools cards keep their own layouts.
+- **Silent App-list Updates**: Windows registry, Store/MSIX package and Start-menu shortcut notifications refresh the catalog after changes settle. Install/update/remove events bypass the installed-metadata cache. Reopening search keeps a safety refresh with a five-second minimum; otherwise unchanged installation metadata is reused for up to 30 seconds. A native background worker builds a replacement catalog and loads icons while app matching continues against the last complete snapshot. No network requests or periodic polling are needed for these listeners.
+- **Background Catalog Warmup**: After the taskbar is available, app, Settings and installed-program metadata load on a background worker. First search reuses that catalog. The search window and its XAML UI remain deferred until needed.
+- **Independent App Results**: App results update without waiting for Everything's file search. Cached icons appear immediately; missing icons fill in afterward. File results arrive separately and preserve the app selection.
+- **Windows Services**: Use `/services` to find services by name or description and manage them from the right-click menu.
+- **Online Utility Cards**: Use `/weather` for your approximate local weather, `/money 100 USD > EUR` for currency conversion, `/crypto BTC` for a crypto spot price, or `/speedtest` for a connection test with a circular speed meter. Data loads separately from local search. See [Online Cards](#online-cards).
 - **Learns Your Favorites**: Apps and custom commands you open from here more often move up among results that match equally well. A clearly better match always stays on top. Can be turned off in the settings, which also forgets what was learned.
 - **Separate Animated Search Window**: Search follows Start's size, taskbar alignment, colors, and rounded corners, with opening and closing animations that follow the taskbar edge (bottom, top, left, or right) and respect Windows' animation setting. It stays out of the taskbar and Alt+Tab. Typing in Start switches immediately without an opening animation and carries the opening text into search. The search bar uses Windows' own search icon.
 - **Windows Search Out of the Way**: `SearchHost.exe` keeps running for the shell, but its window is never shown and it cannot launch Edge WebView2, the web view behind its Bing-backed search panel.
@@ -37,6 +44,7 @@ Version **2.0** introduces a separate Windows 11 search window, with Start appea
 - **Inline Calculator**: Type a sum (e.g. `100 * 5`, `sqrt(144)`, `15% * 200`, `2^10`) and the result shows above the apps; large and small results show in scientific notation too (`= 99000`, `= 9.9e4`). Press Enter to copy it.
 - **Unit Converter**: Type `100 km` to see it in the usual units of its kind, all on one line first, or `100 km → mi` (also `in`, `->`, `=`) for just one; `255 hex` or `0xFF` for other bases. It knows length, mass, temperature, speed, area, volume, data, data rate, time, pressure, energy, power, angle and frequency, with `.` or `,` as the decimal point, and each kind has its color. A number alone, or one in a name (`2024 report`, `3d`), is left to the search. Add units it does not know in the settings, and have them convert back too (Reciprocal).
 - **Network Interface Inspector**: Type `/ip` to display all active Wi-Fi, Ethernet, and VPN network interfaces with their IP addresses, subnet masks, gateways, and hardware descriptions. Press Enter to copy the IP.
+- **Live Hardware Cards**: Type `/usage` for CPU, memory, each GPU, disk activity and network traffic, with colored graphs covering the last 60 seconds. Readings update once a second while the command is visible and stay entirely on your PC.
 - **Full Right-Click Context Menu**: Right-click any file, folder, or application to Open, Run as Administrator, Open in terminal, Properties, Create desktop shortcut, Cut/Copy (files), Copy name (files/folders), Copy path, Open file location, or Uninstall (apps). Escape closes the menu; typing closes it and continues the query.
 - **Native Properties Dialogs**: Properties opens through `explorer.exe`, the same dialog as in File Explorer.
 - **File Preview**: Images, muted media, PDF pages, SVGs, text/document excerpts, and file properties beside search. The card adapts its alignment and resize direction to the search window’s height. See [File Preview](#file-preview) for formats, copying, and folder sizes.
@@ -57,6 +65,8 @@ The mod's Settings page groups related options together:
 | **Appearance** | Display language, text size and color, keyboard shortcut hints, and custom menu dimensions |
 | **Apps & Search** | App result limit, favorite learning, search delay, and an optional keyboard shortcut |
 | **Files & Preview** | Files panel, file result limit, previews, animation, and excluded paths |
+| **Quick Tools** | Localized command names, past/upcoming weather days, extra locations, and saved currency/crypto cards |
+| **Online Cards** | Offline mode, automatic or manual weather location, temperature units, and default quote currency |
 | **Web Search** | Default search engine and keyword shortcuts |
 | **Custom Commands** | Named commands, icons, shells, and terminal visibility |
 | **Custom Unit Conversions** | Units, formulas, categories, and reciprocal conversion |
@@ -97,6 +107,8 @@ In Windhawk, open the mod's **Settings → Custom Commands** and add an entry:
 
 Commands appear alongside installed apps in search results and empty-search suggestions, within **Max App Results**. They share the favorite system: frequently launched entries move up, and equal-use suggestions sort alphabetically. Turning off **Learn Favorite Apps** stops learning and clears history for both apps and commands. Right-click for **Run**, **Run as administrator**, or **Copy command**. Settings changes apply without reopening search. Up to 100 entries are supported.
 
+A name may start with `/`, such as `/backup`. Single-word custom `/commands` share names with Quick Tools and their active compatibility aliases. If the same name belongs to two entries, typing it shows a red conflict card instead of running either one. Names without `/` remain ordinary search entries. A slash name does not add argument forwarding: the saved script runs exactly as configured.
+
 For example, name a CMD command `Downloads`, use `📂` as its icon, and set its command to `explorer.exe "%USERPROFILE%\Downloads"`. Browse Microsoft's [Segoe Fluent Icons list](https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font) for Windows glyphs and their codes.
 
 Custom shell examples (the shell must already be installed):
@@ -108,6 +120,74 @@ Custom shell examples (the shell must already be installed):
 | Bash in WSL | `wsl.exe` | `--exec bash -lc {command}` |
 
 Use a full executable path if it is installed somewhere else. WSL requires an installed Linux distribution. PowerShell 7 installation options are described in [Microsoft’s documentation](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-windows).
+
+## Quick Tools
+
+Open **Settings → Quick Tools** to rename the weather, currency, crypto, IP, hardware-usage and speed-test commands. Enter the word after `/`, in your own language. A leading slash is optional in the setting. For example, setting Weather Command Name to `météo` makes `/météo` and `/météo London` work. The layout remains left-to-right, but command names can contain non-Latin letters.
+
+Names are case-insensitive, cannot contain spaces, and must be distinct. Blank or invalid names use their defaults. If two commands share a name, typing that name shows a red warning card; give them separate names in settings to continue. English compatibility aliases remain only while their primary command name is unchanged. The examples below use the default names.
+
+- **Weather:** choose 0–7 past days and 0–7 upcoming days. The default is two past days, Today, and five upcoming days, arranged chronologically inside one card. Today uses Windows' accent color and follows the city's local date; past days are subdued. Add up to eight **Extra Weather Locations** for separate cards when you enter the command alone. An explicit city argument shows just that city. The primary location and temperature units remain under **Online Cards**.
+- **Currency:** **Saved Currency Cards** can contain a code such as `EUR`, or a conversion such as `100 USD > EUR`. A code alone means one unit converted into the default quote currency. Entering the currency command alone displays the saved list; adding arguments performs that one conversion instead.
+- **Crypto:** **Saved Crypto Cards** accepts symbols such as `BTC`, or conversions such as `0.5 ETH > EUR`. Entering the crypto command alone displays the list. Currency and crypto lists support up to twelve entries each; blank lists restore their default examples. Repeated equivalent entries are combined.
+- **IP:** the renamed IP command still displays local network interfaces and addresses. It works offline and does not contact the approximate-location service.
+- **Hardware usage:** `/usage` displays local resource cards. The command name can be changed here too. See [Live Hardware Usage](#live-hardware-usage).
+- **Speed test:** opens a ready card; press **Run** or Enter to start. The command name defaults to `speedtest`, with `/speed` as an alias while that name is unchanged.
+
+Saved cards fill in individually as their requests complete. Conversions sharing a pair reuse one downloaded rate, and a failed entry does not prevent the other cards from appearing. The selected card stays selected as other cards finish loading.
+
+## Online Cards
+
+Weather, exchange rates, crypto prices and internet speed tests appear as cards in the Apps panel. Only explicit commands make network requests; ordinary app/file search, calculations, and unit conversions stay local. A speed test also requires pressing Run or Enter.
+
+| Type in search | Result |
+| :--- | :--- |
+| `/weather` | Weather for the primary location plus saved extra locations, with history and forecasts inside each card. |
+| `/weather London` | Weather for a city you choose. A country qualifier such as `/weather Paris, France` can help distinguish places. |
+| `/money 100 USD > EUR` | Convert an amount using the latest available currency reference rate. |
+| `/money` | Display the saved currency cards. |
+| `/money USD IQD` | Show the rate for one US dollar in Iraqi dinars. |
+| `/crypto BTC` | Show one bitcoin in the default quote currency, initially USD. |
+| `/crypto` | Display the saved crypto cards. |
+| `/crypto 0.5 ETH > EUR` | Convert a crypto amount using an online spot price. |
+| `/speedtest` or `/speed` | Open the connection-test card, then press Run or Enter. |
+
+With the default names, `/currency` and `/fx` are aliases for `/money`; `/price` is an alias for `/crypto`. The amount defaults to 1. Target currencies can use `>`, `→`, `/`, `to`, or `in`, or simply a space between codes. Currency commands use three-letter codes such as USD, EUR, GBP, JPY and IQD. Crypto commands accept supported ticker symbols, including crypto quote currencies; Bitcoin, Ethereum and Dogecoin also work as names. Invalid arguments show examples without making a request, using your configured command name.
+
+**Weather:** [Open-Meteo](https://open-meteo.com/) supplies the temperature, daily low/high, humidity and wind speed. City searches use its [GeoNames-based geocoding service](https://open-meteo.com/en/docs/geocoding-api). Automatic location uses [ipwho.is](https://ipwhois.io/documentation) and is marked `≈` because it is approximate and can follow a VPN's exit location. Set **Online Cards → Weather Location** to a city, or include a city in the command, to avoid the IP lookup. Temperature can follow Windows' regional measurement settings or use Celsius/Fahrenheit; wind speed is in km/h. Weather timestamps use the city's local time.
+
+**Currency:** [Frankfurter](https://frankfurter.dev/) supplies published reference rates. The date on the card is the provider's rate date. These are reference rates, rather than a bank's retail buy/sell quote, and may not change on weekends or holidays.
+
+**Crypto:** [Coinbase's public price API](https://docs.cdp.coinbase.com/coinbase-app/track-apis/prices) supplies spot prices for supported pairs. Cards show when the price was fetched, in UTC. Supported assets and quote currencies depend on the provider. Prices are snapshots, not a streaming market feed.
+
+**Internet speed:** the open 270-degree speedometer has a cyan-to-mint download arc, a purple upload arc, a moving needle, labeled ticks and a large Mbps reading. Its arc and needle follow speed rather than test completion. The arc, needle and central reading ease smoothly up and down between samples. New readings retarget the current motion without jumping; animation stops when settled or search closes and respects Windows animation settings. The scale starts at 0–1000 Mbps with finer detail at lower speeds and expands for faster connections; the same scale is kept between download and upload. Latency and both speed results remain visible above the dial. **Stop** and **Run again** controls are available. Changing the query cancels the active test. The native client selects a responsive node from a small set of [public LibreSpeed servers](https://librespeed.org/backend-servers/servers.php) and reuses that selection for an hour. It uses five download connections and three upload connections, with [LibreSpeed-style adaptive timing](https://github.com/librespeed/speedtest/blob/master/speedtest_worker.js): a 1.5-second download grace period and 3-second upload grace period let connections reach speed before measurement. Faster runs shorten automatically, with roughly 5–15 seconds of measured traffic per direction instead of a fixed 15-second wait. Results include LibreSpeed's default 6% estimate for transport overhead. Downloads use long streams, and upload chunks grow with the connection speed and shrink conservatively when a server rejects a body. Small probes are paced at four starts per second; bulk transfers have a separate bounded start rate so small upload bodies do not impose the old ~32 Mbps ceiling. A server rate limit stops the transfer group, its Retry-After instruction is honored, and Run during cooldown sends no new traffic. Downloads stop at the measurement cutoff. Already-started uploads have at most three seconds to finish acknowledgment; only their bytes from the measurement window count, and rejected or unconfirmed bodies are discarded. Acknowledged uploads are distributed across their transfer intervals to reduce bias from locally buffered writes at the measurement boundaries. Temporary connection failures have at most two delayed retries per stream. There is no fixed payload cap ending a run early, so data usage depends on connection speed and can be large on fast connections. No extra app, account or API key is needed. No personal files, IP/ISP lookup requests, telemetry or measurement reports are sent. Server capacity, routing, other traffic and VPNs affect results, so different test services can report different speeds. The last completed result stays in memory until the mod unloads. Opening the command again shows it without starting another transfer.
+
+Press Enter or click a completed card to copy the converted numeric value; a weather card copies its displayed weather details, and a speed-test card copies its measurements. Weather and money cards also support right-click copying. Help, loading and error cards do not launch anything.
+
+Results are cached in memory: weather for 10 minutes, currency pairs for an hour, and crypto pairs for 30 seconds. Location lookups are reused for six hours. Changing only the amount reuses a cached pair and calculates locally. Old data is marked **Cached** while a refresh is needed or has failed. Failed requests back off for a minute. Providers are contacted after typing settles, on a separate worker, so they do not delay app results or file results. There is no periodic background polling.
+
+**Privacy and connectivity:** providers see your public IP as part of the connection. For weather, the location service returns an approximate city and Open-Meteo receives the requested city or coordinates. Currency and crypto providers receive only the requested pair, without the amount. No normal search text, account credentials, cookies, or telemetry are sent. Automatic location and downloaded results are not saved to disk. Enable **Online Cards → Offline Mode** to disable these features. Public services can be unavailable or rate limited, and the free Open-Meteo service is intended for noncommercial use. Weather data is credited to Open-Meteo and location names to GeoNames.
+
+## Windows Services
+
+Type `/services` to list local Windows services, or search with `/services audio`, `/services spooler` or words from a service description. `/services running` and `/services stopped` filter by state; the translated state labels work too. The command name is customizable under **Quick Tools → Services command**. It participates in duplicate-name detection and works in Offline Mode.
+
+Each result shows the display name, internal name, current state, process ID when running, and description when available. Results update once per second while visible. Search uses cached entries immediately; service enumeration runs separately so it cannot delay ordinary app or file searches. Changing the query or closing search stops status polling.
+
+Right-click a result for **Start**, **Stop**, **Restart**, **Copy name**, **Copy details**, or **Open Services** for the full Windows management console. Unavailable operations are disabled based on the latest state and the controls the service accepts. Only one operation runs at a time, and Windows errors are shown on the affected card. Clicking a service result or pressing Enter copies its details.
+
+Operations use Windows’ service controller through a short-lived hidden Windows PowerShell helper. Administrator approval is requested only if Windows denies the selected operation. Service names are encoded as data rather than inserted into executable instructions. Restart waits for Stop to finish before starting again; dependent services are never forcibly stopped. Disabled services are not enabled automatically, and startup types are not changed. An operation already requested can finish after search closes. No service information leaves the PC.
+
+## Live Hardware Usage
+
+Enter `/usage` to show a separate card for **CPU**, **RAM**, **each GPU**, **disk activity** and **network traffic**. Each card has a colored graph with up to 60 seconds of history. Values update every second without rebuilding the controls or moving selection. Clicking a measured card copies its current reading.
+
+- CPU shows average processor activity; RAM shows used physical memory and its total.
+- GPU cards use Windows performance counters. Activity is combined across processes on each engine, then the busiest engine represents the adapter, following Task Manager's approach. Each detected GPU has its own graph.
+- Disk activity shows the aggregate physical-disk active percentage, plus read/write throughput.
+- Network traffic sums active physical Ethernet and Wi-Fi adapters, with download/upload rates. Virtual and tunnel interfaces are excluded to avoid counting VPN traffic twice. This observes existing traffic and does not generate a network test.
+
+Collection runs on a separate worker, only while this command is open. Closing search or changing the query stops it and releases performance-counter resources. Reopening starts fresh history. Unavailable counters are shown as unavailable, and missing readings leave gaps rather than false zeroes. Nothing is uploaded or saved to disk, and this command works in Offline Mode. Cards use monochrome Windows icons. GPU cards also show **VRAM used / total** for dedicated GPU memory, updated every second; unavailable counters show a dash. GPU support depends on the installed Windows display driver and counters.
 
 ## File Preview
 
@@ -187,7 +267,7 @@ To add another way to open search, go to **Settings → Apps & Search**, turn on
 
 Note on Pinning: Windows 11 blocks programmatic pinning to the Taskbar or Start Menu. Use Create desktop shortcut first, then right-click the shortcut on your desktop and select Pin to Taskbar or Pin to Start.
 
-## Built-In Commands and Utilities
+## Quick Tools and Utilities
 
 | Command | Description | Example | Enter Action |
 | :--- | :--- | :--- | :--- |
@@ -196,6 +276,7 @@ Note on Pinning: Windows 11 blocks programmatic pinning to the Taskbar or Start 
 | `<number> <unit>` | The number in the usual units of its kind, all on one line first | `100 km`<br>`32 f`<br>`1,5 kg` | Copies the selected one |
 | `<number> <unit> → <unit>` | Just that conversion (also `to`, `in`, `->`, `=`) | `100 km → mi`<br>`100 mbps → MB/s` | Copies the result |
 | `/ip` | Lists all active Wi-Fi, Ethernet, and VPN adapters with IP, subnet, gateway, and adapter name | `/ip` | Copies selected IP address to clipboard |
+| `/speedtest` | Measures HTTPS latency and approximate download/upload speed | `/speedtest` or `/speed` | Starts a ready test, or copies a completed result |
 | `?<query>` | Searches the web using the default search engine URL | `?weather today` | Opens search in default web browser |
 | `?<shortcut> <query>` | Searches specific service using configured shortcut keyword | `?yt lofi hip hop`<br>`?gh windhawk` | Opens query on target service |
 
