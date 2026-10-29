@@ -88,7 +88,7 @@ struct App {
     bool installedOnly = false,inventoryOnly=false;
     bool targetExists=false,linkExists=false;
     std::wstring installedId,installedName,installedPublisher,installedVersion,installedPackage;
-    std::wstring installedLocation,installedFamily,installedKey;HKEY installedHive=nullptr;REGSAM installedView=0;
+    std::wstring installedLocation,installedFamily,installedKey,installedArchitecture;HKEY installedHive=nullptr;REGSAM installedView=0;
     std::unique_ptr<ITEMIDLIST, PidlFree> pidl;
 };
 const std::wstring& IconIdentity(const App& app){return app.installedOnly?app.installedId:app.name;}
@@ -457,13 +457,13 @@ int main() {
     const auto suiteRevision=Queue(L"suite");
     Check(Apps(suiteRevision) && Files(suiteRevision),"normal installed-only matching completes promptly");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.empty(),"installed-only products are excluded from normal app search");}
-    const auto inventoryRevision=Queue(L"/all installed suite");
+    const auto inventoryRevision=Queue(L"/all suite");
     Check(Apps(inventoryRevision) && Files(inventoryRevision),"installed inventory publishes without waiting for file results");
     {std::lock_guard lock(observedMutex);const auto& row=seenApps.back().rows[0];Check(row.installedOnly && !row.canRunAsAdmin && !row.isFile && row.openPath==L"ms-settings:appsfeatures","installed-only products keep the explicit marker and safe management destination");Check(row.installedLocation==L"C:\\Program Files\\Suite" && row.installedKey==L"suite-record" && row.installedHive==HKEY_CURRENT_USER && row.installedView==KEY_WOW64_64KEY,"installation folder and exact registry identity reach the UI without a lookup");}
     {std::lock_guard lock(observedMutex);Check(seenFiles.back().rows.empty(),"installed inventory performs no Everything file query");}
     Check(!RequestMoreInstalled(L"stale inventory",1,inventoryRevision),"stale inventory scroll cannot schedule another query");
-    Check(!RequestMoreInstalled(L"/all installed suite",1,inventoryRevision),"a complete filtered inventory has nothing more to load");
-    const auto firstBatch=Queue(L"/all installed");
+    Check(!RequestMoreInstalled(L"/all suite",1,inventoryRevision),"a complete filtered inventory has nothing more to load");
+    const auto firstBatch=Queue(L"/all");
     Check(Apps(firstBatch) && Files(firstBatch),"unfiltered inventory publishes its first batch");
     std::vector<Row> initial;
     {std::lock_guard lock(observedMutex);initial=seenApps.back().rows;
@@ -474,24 +474,24 @@ int main() {
     Check(InstalledNearEnd(0,1200,900),"a tall viewport can request enough rows to become scrollable");
     Check(!InstalledNearEnd(0,0,1400) && !InstalledNearEnd(0,600,0) && !InstalledNearEnd(-1,600,1400) &&
           !InstalledNearEnd(std::numeric_limits<double>::infinity(),600,1400),"unmeasured and invalid scroll metrics do not request content");
-    Check(!RequestMoreInstalled(L"/all installed",19,firstBatch),"a partial or stale visible-card count cannot advance the inventory");
-    Check(RequestMoreInstalled(L"/all installed",20,firstBatch),"the first downward scroll requests another 20 rows");
-    Check(!RequestMoreInstalled(L"/all installed",20,firstBatch),"repeated scroll events cannot duplicate an in-flight batch");
+    Check(!RequestMoreInstalled(L"/all",19,firstBatch),"a partial or stale visible-card count cannot advance the inventory");
+    Check(RequestMoreInstalled(L"/all",20,firstBatch),"the first downward scroll requests another 20 rows");
+    Check(!RequestMoreInstalled(L"/all",20,firstBatch),"repeated scroll events cannot duplicate an in-flight batch");
     uint64_t secondBatch;{std::lock_guard lock(g_queryMutex);secondBatch=g_queryRevision;}
     Check(Apps(secondBatch) && Files(secondBatch),"the second batch publishes through the existing app worker");
     {std::lock_guard lock(observedMutex);const auto& rows=seenApps.back().rows;
      Check(rows.size()==40,"the list grows from 20 to 40 without navigation cards");
      Check(std::equal(initial.begin(),initial.end(),rows.begin(),[](const auto& a,const auto& b){return a.title==b.title && a.cardSignature==b.cardSignature && a.appIndex==b.appIndex && a.iconKey==b.iconKey;}),"already visible card identities stay unchanged when new rows append");
      Check(rows.back().installedProtected && !rows.back().installedPackage.empty(),"new component rows retain protection and exact package identity");}
-    Check(RequestMoreInstalled(L"/all installed",40,secondBatch),"the next scroll requests rows 41 through 60");
+    Check(RequestMoreInstalled(L"/all",40,secondBatch),"the next scroll requests rows 41 through 60");
     uint64_t thirdBatch;{std::lock_guard lock(g_queryMutex);thirdBatch=g_queryRevision;}
     Check(Apps(thirdBatch) && Files(thirdBatch),"the third batch publishes promptly");
-    Check(RequestMoreInstalled(L"/all installed",60,thirdBatch),"the last scroll requests the remaining rows");
+    Check(RequestMoreInstalled(L"/all",60,thirdBatch),"the last scroll requests the remaining rows");
     uint64_t lastBatch;{std::lock_guard lock(g_queryMutex);lastBatch=g_queryRevision;}
     Check(Apps(lastBatch) && Files(lastBatch),"the last partial batch publishes promptly");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==71 && seenFiles.back().rows.empty(),"all 71 records become visible and no Everything request is made");}
-    Check(!RequestMoreInstalled(L"/all installed",71,lastBatch),"scrolling at the real end stops requesting data");
-    const auto resetBatch=Queue(L"/all installed package");
+    Check(!RequestMoreInstalled(L"/all",71,lastBatch),"scrolling at the real end stops requesting data");
+    const auto resetBatch=Queue(L"/all package");
     {std::lock_guard lock(g_queryMutex);Check(g_installedVisibleLimit==20 && g_installedBatchQuery.empty(),"typing a new filter resets the batch size");}
     Check(Apps(resetBatch) && Files(resetBatch),"a new inventory filter publishes promptly");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==20,"a changed filter returns to the first 20 results");}

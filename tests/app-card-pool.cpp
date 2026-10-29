@@ -120,6 +120,21 @@ int main(){
             g_settings.maxAppResults=4;++g_settingsRevision;
             RenderPlainApps(Rows(4),true);
             Check(g_plainAppPool->size()==4 && g_appsList.Children().Size()==4 && (*g_appButtonsOpt)[0]!=buttons[0],"settings changes rebuild a pool bounded by the new limit");
+            auto inventory=Rows(20,200);
+            auto prepareInventory=[](std::vector<Row>& rows){for(auto& row:rows){row.installedOnly=true;
+                row.sectionTitle=L"Installed apps";row.installedTotal=500;row.openPath=L"ms-settings:appsfeatures";
+                row.cardSignature=row.title;row.canRunAsAdmin=false;}};
+            prepareInventory(inventory);
+            Check(RenderPlainApps(inventory,false),"management rows with a section title use the reusable plain-card pool");
+            std::vector<wuxc::Button> firstBatch;for(auto& slot:*g_plainAppPool)firstBatch.push_back(slot.card.button);
+            inventory=Rows(220,200);prepareInventory(inventory);
+            Check(RenderPlainApps(inventory,false) && g_appsList.Children().Size()==220,
+                  "inventory batches grow independently of the normal app-result limit");
+            for(size_t i=0;i<firstBatch.size();++i)Check((*g_appButtonsOpt)[i]==firstBatch[i],
+                "large inventory appends preserve all original card controls");
+            const int attachments=inputAttachments;
+            Check(RenderPlainApps(inventory,false) && inputAttachments==attachments,
+                  "repainting a long inventory adds no controls or input handlers");
         }
         DetachPlainAppPool();g_plainAppPool.reset();g_activeAppsOpt.reset();g_appButtonsOpt.reset();g_appsList=nullptr;g_paintedSelectedButton={};
         source.Content(nullptr);source.Close();source=nullptr;manager.Close();manager=nullptr;DestroyWindow(hwnd);

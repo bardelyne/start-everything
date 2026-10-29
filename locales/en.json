@@ -138,7 +138,6 @@
     "ServiceRestart": "Restart",
     "NoServices": "No matching services",
     "CopyDetails": "Copy details",
-    "NotLaunchable": "No launcher found",
     "ManageInstalled": "Manage in Installed apps",
     "InstalledApp": "Installed app",
     "InstalledApps": "Installed apps"

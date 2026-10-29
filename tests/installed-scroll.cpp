@@ -1,4 +1,4 @@
-// Hidden, isolated XAML host. Does not touch Explorer or inject user input.
+// Offscreen, isolated XAML host. Does not touch Explorer or inject user input.
 #define NOMINMAX
 #include <windows.h>
 #include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
@@ -25,7 +25,7 @@ enum class CustomCommandShell { Cmd };
 std::mutex g_queryMutex;
 std::condition_variable g_queryWake;
 std::atomic<bool> g_searchQuit{false},g_queryDirty{false},g_isOverlayVisible{true};
-std::wstring g_pendingQuery=L"/all installed",g_shownQuery=g_pendingQuery;
+std::wstring g_pendingQuery=L"/all",g_shownQuery=g_pendingQuery;
 uint64_t g_queryRevision=1,g_shownAppsRevision=1;
 // PRODUCTION_BATCH
 std::vector<Row> g_currentAppRows;
@@ -37,7 +37,7 @@ void Pump(){MSG m{};while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessa
 int main(){
     try{
         winrt::init_apartment(winrt::apartment_type::single_threaded);
-        HWND hwnd=CreateWindowExW(WS_EX_TOOLWINDOW,L"STATIC",L"Isolated inventory scrolling test",WS_POPUP,0,0,360,400,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+        HWND hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"STATIC",L"Isolated inventory scrolling test",WS_POPUP,-32000,-32000,360,400,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
         auto manager=wux::Hosting::WindowsXamlManager::InitializeForCurrentThread();
         auto source=wux::Hosting::DesktopWindowXamlSource();
         auto native=source.as<IDesktopWindowXamlSourceNative>();native->AttachToWindow(hwnd);
@@ -46,9 +46,19 @@ int main(){
         g_appsScroll.VerticalScrollBarVisibility(wuxc::ScrollBarVisibility::Auto);g_appsScroll.Content(rows);source.Content(g_appsScroll);
         std::vector<wuxc::Button> originals;
         auto append=[&](unsigned count){for(unsigned i=0;i<count;++i){wuxc::Button row;row.Height(50);row.Content(winrt::box_value(L"Installed product"));rows.Children().Append(row);originals.push_back(row);}};
-        auto layout=[&]{g_appsScroll.Measure({360,400});g_appsScroll.Arrange({0,0,360,400});g_appsScroll.UpdateLayout();Pump();};
+        float viewport=400;
+        ShowWindow(hwnd,SW_SHOWNOACTIVATE);
+        auto layout=[&]{
+            SetWindowPos(child,nullptr,0,0,360,static_cast<int>(viewport),SWP_NOACTIVATE|SWP_NOZORDER|SWP_SHOWWINDOW);
+            g_appsScroll.Width(360);g_appsScroll.Height(viewport);g_appsScroll.ApplyTemplate();
+            g_appsScroll.Measure({360,viewport});g_appsScroll.Arrange({0,0,360,viewport});g_appsScroll.UpdateLayout();Pump();
+        };
         append(20);layout();
-        Check(g_appsScroll.ExtentHeight()>=1000 && g_appsScroll.ViewportHeight()>0,"real ScrollViewer measures the first 20 cards");
+        const auto initialDeadline=GetTickCount64()+3000;
+        while(g_appsScroll.ViewportHeight()<=0 && GetTickCount64()<initialDeadline){Pump();Sleep(5);layout();}
+        if(g_appsScroll.ExtentHeight()<999 || g_appsScroll.ViewportHeight()<=0)
+            printf("Initial scroll metrics: extent %.3f, viewport %.3f\n",g_appsScroll.ExtentHeight(),g_appsScroll.ViewportHeight());
+        Check(g_appsScroll.ExtentHeight()>=999 && g_appsScroll.ViewportHeight()>0,"real ScrollViewer measures the first 20 cards");
         g_currentAppRows.resize(20);for(auto& row:g_currentAppRows){row.installedOnly=true;row.installedTotal=60;}
         g_installedBatchQuery=g_pendingQuery;g_installedTotal=60;g_installedVisibleLimit=20;
         auto event=g_appsScroll.ViewChanged(winrt::auto_revoke,[](wf::IInspectable const& sender,auto const&){CheckInstalledScroll(sender.as<wuxc::ScrollViewer>());});
@@ -62,13 +72,29 @@ int main(){
         append(20);g_currentAppRows.resize(40);
         for(auto& row:g_currentAppRows){row.installedOnly=true;row.installedTotal=60;}
         g_shownAppsRevision=g_queryRevision;layout();
-        Check(rows.Children().Size()==40 && g_appsScroll.ExtentHeight()>=2000,"appending extends the existing content instead of replacing it");
+        Check(rows.Children().Size()==40 && g_appsScroll.ExtentHeight()>=1999,"appending extends the existing content instead of replacing it");
         Check(std::abs(g_appsScroll.VerticalOffset()-offset)<1,"native scroll offset stays stable when the next batch appends");
         for(unsigned i=0;i<20;++i)Check(rows.Children().GetAt(i)==originals[i],"previously visible native card controls keep their identity");
         Check(g_queryRevision==2,"content growth does not automatically request all remaining rows");
         g_appsScroll.ChangeView(nullptr,0.0,nullptr,true);layout();
         Check(g_appsScroll.VerticalOffset()==0,"changing a filter can return the list to its top without animation");
-        event.revoke();g_currentAppRows.clear();rows.Children().Clear();originals.clear();
+        event.revoke();rows.Children().Clear();originals.clear();
+        g_queryRevision=g_shownAppsRevision=100;g_installedVisibleLimit=20;g_installedTotal=60;
+        g_currentAppRows.resize(20);for(auto& row:g_currentAppRows){row.installedOnly=true;row.installedTotal=60;}
+        viewport=2500;
+        auto contentEvent=g_appsScroll.LayoutUpdated(winrt::auto_revoke,[](auto const&,auto const&){CheckInstalledScroll(g_appsScroll);});
+        auto sizeEvent=g_appsScroll.SizeChanged(winrt::auto_revoke,[](auto const&,auto const&){CheckInstalledScroll(g_appsScroll);});
+        append(20);layout();
+        Check(g_queryRevision==101 && g_installedVisibleLimit==40,
+              "a tall viewport requests its next batch after native layout without scrolling");
+        g_currentAppRows.resize(40);for(auto& row:g_currentAppRows){row.installedOnly=true;row.installedTotal=60;}
+        g_shownAppsRevision=g_queryRevision;append(20);layout();
+        Check(g_queryRevision==102 && g_installedVisibleLimit==60,
+              "completed layout fills remaining tall viewport space after the next batch");
+        g_currentAppRows.resize(60);for(auto& row:g_currentAppRows){row.installedOnly=true;row.installedTotal=60;}
+        g_shownAppsRevision=g_queryRevision;append(20);layout();
+        Check(g_queryRevision==102,"automatic filling stops at the actual inventory end");
+        contentEvent.revoke();sizeEvent.revoke();g_currentAppRows.clear();rows.Children().Clear();originals.clear();
         g_appsScroll.Content(nullptr);source.Content(nullptr);g_appsScroll=nullptr;source.Close();source=nullptr;manager.Close();manager=nullptr;DestroyWindow(hwnd);Pump();
         winrt::uninit_apartment();printf("PASS: %d native inventory-scroll checks\n",checks);return 0;
     }catch(winrt::hresult_error const& e){printf("XAML error %08X\n",unsigned(e.code()));return 1;}

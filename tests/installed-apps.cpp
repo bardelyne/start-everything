@@ -169,30 +169,31 @@ int main(){
         {L"runtime1",L"Runtime",L"Vendor",L"1.0",L"",L""},
         {L"runtime2",L"Runtime",L"Vendor",L"2.0",L"",L""}};
     apps::AppendInstalled(entries,products);
-    Check(entries.size()==6,"launchable product records merge while standalone suite and versioned products remain indexed");
+    Check(entries.size()==3,"ordinary catalog stores launchers without a second installed-only inventory");
     Check(!entries[0].installedOnly && !entries[1].installedOnly && !entries[2].installedOnly,"merging metadata does not turn launchable apps into management entries");
     Check(std::find(entries[1].aliases.begin(),entries[1].aliases.end(),L"telegram desktop")!=entries[1].aliases.end(),"Installed apps naming becomes a searchable alias on the real launcher");
-    const auto& office=entries[3];
+    auto inventoryEntries=apps::InstalledInventory(products);
+    const auto& office=inventoryEntries[2];
     Check(office.installedOnly && office.targetPath==L"ms-settings:appsfeatures" && !office.pidl,"suite without a launch entry has only a safe management destination");
     Check(office.installedIcon==L"C:\\Installer\\OfficeClickToRun.exe" && office.exeNameLower.empty() && office.targetPathLower.empty(),"an icon or installer executable never becomes a launch target or executable-name match");
     Check(apps::ScoreApp(office,L"en-us")>=0 && apps::ScoreApp(office,L"en-us")<80,"suite language suffix is discoverable as a real name match");
-    Check(!apps::SameResult(entries[4],entries[5]) && apps::SameResult(entries[4],entries[4]),"distinct installed registrations retain separate result identities");
-    Check(apps::IconIdentity(entries[4])!=apps::IconIdentity(entries[5]),"versioned products do not share cached icons just because their captions match");
+    Check(!apps::SameResult(inventoryEntries[4],inventoryEntries[5]) && apps::SameResult(inventoryEntries[4],inventoryEntries[4]),"distinct installed registrations retain separate result identities");
+    Check(apps::IconIdentity(inventoryEntries[4])!=apps::IconIdentity(inventoryEntries[5]),"versioned products do not share cached icons just because their captions match");
     {
         auto settings=Launchable(L"Runtime settings",L"ms-settings:appsfeatures");settings.isSetting=true;
         entries.push_back(std::move(settings));
         installed::Record component;component.id=L"hidden-component";component.name=L"Hidden Runtime";component.inventoryOnly=true;
         component.launcher=L"C:\\Apps\\NeverRunThis.exe";
         apps::AppendInstalled(entries,{component});
-        Check(entries.back().installedOnly && entries.back().inventoryOnly && !entries.back().pidl,
+        Check(entries.size()==4 && std::none_of(entries.begin(),entries.end(),[](const auto& app){return app.inventoryOnly;}),
               "hidden components cannot acquire a guessed launch target");
         auto normal=apps::MatchCatalog(entries,L"runtime",100,nullptr,apps::SearchScope::Normal);
         Check(normal.size()==1 && normal[0].app->isSetting,"normal search keeps Settings and excludes installed-only and hidden components");
-        auto inventory=apps::MatchCatalog(entries,L"runtime",100,nullptr,apps::SearchScope::Installed);
-        Check(inventory.size()==3 && std::none_of(inventory.begin(),inventory.end(),[](const auto& hit){return hit.app->isSetting;}),
-              "installed inventory includes hidden components and both runtime versions without Settings pages");
         auto records=products;records.push_back(component);
         auto direct=apps::InstalledInventory(records);
+        auto inventory=apps::MatchCatalog(direct,L"runtime",100,nullptr,apps::SearchScope::Installed);
+        Check(inventory.size()==3 && std::none_of(inventory.begin(),inventory.end(),[](const auto& hit){return hit.app->isSetting;}),
+              "installed inventory includes hidden components and both runtime versions without Settings pages");
         const auto all=apps::MatchCatalog(direct,L"",100,nullptr,apps::SearchScope::Installed);
         Check(all.size()==records.size(),"empty installed inventory comes directly from all registrations and packages without AppsFolder entries");
         Check(std::all_of(direct.begin(),direct.end(),[](const auto& app){
@@ -202,9 +203,9 @@ int main(){
         Check(apps::MatchCatalog(entries,L"",100,nullptr,apps::SearchScope::Normal).empty(),"normal empty queries keep their existing suggestion path");
         Check(apps::MatchCatalog(direct,L"en-us",100,nullptr,apps::SearchScope::Installed).size()==1,
               "unlaunchable suite metadata is searchable in inventory");
-        Check(apps::MatchCatalog(entries,L"runtime",1,nullptr,apps::SearchScope::Installed).size()==1,
+        Check(apps::MatchCatalog(direct,L"runtime",1,nullptr,apps::SearchScope::Installed).size()==1,
               "inventory rendering respects the result limit without discarding catalog entries");
-        entries.pop_back();entries.pop_back();
+        entries.pop_back();
     }
     std::vector<apps::App> packaged;
     auto executable=Launchable(L"Executable launcher",L"C:\\Apps\\Store.exe");
@@ -214,15 +215,28 @@ int main(){
     Check(packaged.size()==1 && !packaged[0].installedOnly,"package identity survives resolving a shell launcher to an executable");
     packaged.push_back(Launchable(L"Second launcher",L"Family_1234567890123!Other"));
     apps::AppendInstalled(packaged,{products[3]});
-    Check(packaged.size()==3 && packaged[2].installedOnly,"multi-app package remains manageable as a product without choosing an arbitrary launcher");
+    Check(packaged.size()==2 && apps::InstalledInventory({products[3]}).size()==1,"multi-app package remains in inventory without choosing an arbitrary launcher");
     installed::Record friendly;friendly.id=L"package:friendly";friendly.name=L"Windows App Runtime Main";friendly.family=L"Runtime_1234567890123";
     friendly.packageFullName=L"Runtime_1.0.0.0_x64__1234567890123";friendly.aliases={L"WinAppRuntime.Main.2"};
     friendly.location=L"C:\\Package Location";friendly.registryKey=L"exact-record";friendly.registryHive=HKEY_CURRENT_USER;friendly.registryView=KEY_WOW64_64KEY;
-    std::vector<apps::App> friendlyEntries;apps::AppendInstalled(friendlyEntries,{friendly});
+    auto friendlyEntries=apps::InstalledInventory({friendly});
     Check(friendlyEntries[0].installedOnly && friendlyEntries[0].name==friendly.name && friendlyEntries[0].installedPackage==friendly.packageFullName,"friendly title and package icon identity retain the management-only behavior");
     Check(apps::ScoreApp(friendlyEntries[0],L"winappruntime.main.2")>=0,"old technical package name remains searchable as an alias");
     Check(friendlyEntries[0].installedLocation==friendly.location && friendlyEntries[0].installedFamily==friendly.family &&
         friendlyEntries[0].installedKey==friendly.registryKey && friendlyEntries[0].installedHive==friendly.registryHive && friendlyEntries[0].installedView==friendly.registryView,"installed-only results retain the exact folder, package family and registry registration");
+    {
+        installed::Record product;product.id=L"package:calc";product.name=L"Calculator";product.family=L"Calc_1234567890123";
+        product.architecture=L"x64";product.packageFullName=L"Microsoft.Calculator_1.2.3.4_x64__1234567890123";
+        product.inventoryAliases={L"Microsoft.Calculator",product.packageFullName};
+        std::vector<apps::App> launchers;launchers.push_back(Launchable(L"Calculator",L"Calc_1234567890123!App"));
+        apps::AppendInstalled(launchers,{product});
+        for(const auto query:{L"x64",L"1.2.3.4",L"microsoft.calculator"})
+            Check(apps::MatchCatalog(launchers,query,20,nullptr,apps::SearchScope::Normal).empty(),
+                  "technical package identities cannot pollute ordinary app matching");
+        auto inventory=apps::InstalledInventory({product});
+        Check(apps::MatchCatalog(inventory,L"x64",20,nullptr,apps::SearchScope::Installed).size()==1 &&
+              inventory[0].installedArchitecture==L"x64","inventory retains architecture search and exact architecture metadata");
+    }
     {
         installed::Record product;product.id=L"different-caption";product.name=L"playit";product.version=L"1.0.10";product.location=L"C:\\Apps\\Playit\\";
         const auto launcher=[](const wchar_t* path){auto app=Launchable(L"Playit.gg",path);app.shellIdentity=L"Original.Shortcut.Identity";return app;};
@@ -231,26 +245,26 @@ int main(){
         Check(merged.size()==1 && !merged[0].installedOnly && merged[0].name==L"Playit.gg","registered product and differently named shortcut merge through the executable under its installation folder");
         Check(merged[0].targetPath==L"C:\\Apps\\Playit\\bin\\playit.exe" && merged[0].shellIdentity==L"Original.Shortcut.Identity" && apps::ScoreApp(merged[0],L"playit")==4,"merging adds the product alias while preserving the original shortcut identity and target");
         std::vector<apps::App> sibling;sibling.push_back(launcher(L"C:\\Apps\\Playit-other\\bin\\playit.exe"));apps::AppendInstalled(sibling,{product});
-        Check(sibling.size()==2 && sibling.back().installedOnly,"a sibling folder with the same executable basename is a different installation");
+        Check(sibling.size()==1 && apps::ScoreApp(sibling[0],L"playit")!=4,"a sibling folder with the same executable basename is a different installation");
         std::vector<apps::App> different;different.push_back(launcher(L"D:\\Other\\playit.exe"));apps::AppendInstalled(different,{product});
-        Check(different.size()==2 && different.back().installedOnly,"a same-named executable on another drive cannot hide the registered product");
+        Check(different.size()==1 && apps::ScoreApp(different[0],L"playit")!=4,"a same-named executable on another drive cannot hide the registered product");
         std::vector<apps::App> ambiguous;ambiguous.push_back(launcher(L"C:\\Apps\\Playit\\v1\\playit.exe"));ambiguous.push_back(launcher(L"C:\\Apps\\Playit\\v2\\playit.exe"));apps::AppendInstalled(ambiguous,{product});
-        Check(ambiguous.size()==3 && ambiguous.back().installedOnly,"different matching executables within one product folder remain ambiguous");
+        Check(ambiguous.size()==2 && std::none_of(ambiguous.begin(),ambiguous.end(),[](const auto& app){return apps::ScoreApp(app,L"playit")==4;}),"different matching executables within one product folder remain ambiguous");
         std::vector<apps::App> sameFile;sameFile.push_back(launcher(L"C:\\Apps\\Playit\\bin\\playit.exe"));sameFile.push_back(Launchable(L"Playit alternate shortcut",L"C:\\Apps\\Playit\\bin\\playit.exe"));apps::AppendInstalled(sameFile,{product});
         Check(sameFile.size()==2 && std::all_of(sameFile.begin(),sameFile.end(),[](const auto& app){return !app.installedOnly && apps::ScoreApp(app,L"playit")==4;}),"multiple real shortcuts to the same file retain their actions without an extra management result");
         std::vector<apps::App> resolved;auto app=launcher(L"App.Shortcut.ID");app.linkTarget=L"C:/Apps/Playit/./bin/../bin/PLAYIT.EXE";resolved.push_back(std::move(app));apps::AppendInstalled(resolved,{product});
         Check(resolved.size()==1 && resolved[0].targetPath==L"App.Shortcut.ID","case, separators and dot segments normalize while app-ID activation stays intact");
         product.location=L"C:\\";std::vector<apps::App> root;root.push_back(launcher(L"C:\\Apps\\Playit\\bin\\playit.exe"));apps::AppendInstalled(root,{product});
-        Check(root.size()==2 && root.back().installedOnly,"drive-root installation metadata cannot merge unrelated programs");
+        Check(root.size()==1 && apps::ScoreApp(root[0],L"playit")!=4,"drive-root installation metadata cannot merge unrelated programs");
         PWSTR common=nullptr;Check(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFiles,0,nullptr,&common)) && common,"the shared Program Files folder is available for a boundary check");
         product.location=common;std::vector<apps::App> shared;const auto sharedTarget=product.location+L"\\Playit\\bin\\playit.exe";shared.push_back(launcher(sharedTarget.c_str()));apps::AppendInstalled(shared,{product});CoTaskMemFree(common);
-        Check(shared.size()==2 && shared.back().installedOnly,"a shared system installation root is not sufficient product identity");
+        Check(shared.size()==1 && apps::ScoreApp(shared[0],L"playit")!=4,"a shared system installation root is not sufficient product identity");
         product.location=L"C:\\Apps\\Playit";product.family=L"SomePackage_1234567890123";std::vector<apps::App> package;package.push_back(launcher(L"C:\\Apps\\Playit\\bin\\playit.exe"));apps::AppendInstalled(package,{product});
-        Check(package.size()==2 && package.back().installedOnly,"package registration still requires its package family identity");
+        Check(package.size()==1 && apps::ScoreApp(package[0],L"playit")!=4,"package registration still requires its package family identity");
         product.family.clear();product.name=L"Play It";std::vector<apps::App> punctuation;punctuation.push_back(launcher(L"C:\\Apps\\Playit\\bin\\Play_It.exe"));apps::AppendInstalled(punctuation,{product});
         Check(punctuation.size()==1,"filename punctuation is compared as part of the complete product name");
         product.name=L"Suite";std::vector<apps::App> suite;suite.push_back(Launchable(L"Suite editor",L"C:\\Apps\\Playit\\bin\\editor.exe"));apps::AppendInstalled(suite,{product});
-        Check(suite.size()==2 && suite.back().installedOnly,"a suite record is not replaced by an arbitrary program in its folder");
+        Check(suite.size()==1 && apps::ScoreApp(suite[0],L"suite")!=4,"a suite record is not replaced by an arbitrary program in its folder");
     }
     const auto programs=installed::ReadPrograms(),packages=installed::ReadPackages();
     Check(!programs.empty(),"read-only native enumeration includes registered installed programs");
@@ -278,6 +292,12 @@ int main(){
         const bool built=withoutShell.Rebuild();blockAppsFolder=false;
         Check(built && !withoutShell.Search(L"",1000,nullptr,apps::SearchScope::Installed).empty(),
               "installed inventory still builds when AppsFolder is unavailable");
+    }
+    {
+        const auto count=index.Count();blockAppsFolder=true;
+        const auto failed=index.Refreshed(true);const bool replaced=index.Rebuild();blockAppsFolder=false;
+        Check(!failed && !replaced && index.Count()==count,
+              "failed AppsFolder refresh retains the complete published launcher catalog");
     }
     for(size_t i=0;i<index.Count();++i) {
         const auto* app=index.At(i);
@@ -324,7 +344,8 @@ int main(){
     Check(!warmed.index->Search(L"en-us",100,nullptr,apps::SearchScope::Installed).empty() && !refreshed->Search(L"en-us",100,nullptr,apps::SearchScope::Installed).empty(),"both old and refreshed native snapshots keep valid inventory identities and PIDLs");
     warmer.Stop();
     size_t installedCount=0;
-    for(size_t i=0;i<index.Count();++i){const auto* app=index.At(i);if(app->installedOnly){++installedCount;Check(app->targetPath==L"ms-settings:appsfeatures" && !app->pidl,"every installed-only native result opens management instead of an arbitrary executable");}}
+    for(size_t i=0;i<index.Count();++i){const auto* app=index.At(i);if(app->installedOnly)++installedCount;}
+    Check(installedCount==0,"ordinary snapshots do not retain a duplicate installed-only catalog");
     for(const auto& record:programs)if(record.name.find(L"Microsoft 365 Apps for enterprise")!=std::wstring::npos){
         const auto matches=index.Search(L"en-us",100,nullptr,apps::SearchScope::Installed);
         Check(std::any_of(matches.begin(),matches.end(),[&](const auto& match){return match.app->name==record.name && match.app->installedOnly;}),"this PC's Microsoft 365 en-us suite is present in search");

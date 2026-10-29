@@ -138,7 +138,6 @@
     "ServiceRestart": "再起動",
     "NoServices": "一致するサービスがありません",
     "CopyDetails": "詳細をコピー",
-    "NotLaunchable": "起動方法が見つかりません",
     "ManageInstalled": "インストールされているアプリで管理",
     "InstalledApp": "インストール済みアプリ",
     "InstalledApps": "インストールされているアプリ"

@@ -138,7 +138,6 @@
     "ServiceRestart": "重新启动",
     "NoServices": "没有匹配的服务",
     "CopyDetails": "复制详细信息",
-    "NotLaunchable": "未找到启动入口",
     "ManageInstalled": "在已安装的应用中管理",
     "InstalledApp": "已安装的应用",
     "InstalledApps": "已安装的应用"

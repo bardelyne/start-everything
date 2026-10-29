@@ -138,7 +138,6 @@
     "ServiceRestart": "重新啟動",
     "NoServices": "沒有符合的服務",
     "CopyDetails": "複製詳細資料",
-    "NotLaunchable": "找不到啟動方式",
     "ManageInstalled": "在已安裝的應用程式中管理",
     "InstalledApp": "已安裝的應用程式",
     "InstalledApps": "已安裝的應用程式"

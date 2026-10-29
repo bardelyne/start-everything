@@ -190,6 +190,12 @@ int main() {
     Check(Key('C')==7 && g_searchWindowInputs.empty() && downstreamCalls==1,"another hook's nonzero decision is preserved exactly");
     Reset();Key('C');Key('C',false);ApplySearchWindowInput();
     Check(g_ourBox.Text()==L"c" && downstreamCalls==2,"unmapped opening text is captured once after other hooks allow it");
+    Reset();layout=reinterpret_cast<HKL>(0x804);
+    Key('N');Key('N',false);
+    const int beforeReplay=downstreamCalls;
+    Check(beforeReplay==2,"CJK physical press and release each reach the downstream hook once");
+    Check(Key('N',true,kSearchWindowImeReplayTag)==0 && Key('N',false,kSearchWindowImeReplayTag)==0 &&
+          downstreamCalls==beforeReplay,"our tagged CJK replay reaches Windows without repeating downstream hotkeys");
     Reset(); Ctrl();
     Check(Key('V') == 1 && PasteQueued(), "Start Ctrl+V is captured before native Start handles it");
     Check(pastes == 0 && shown == 0, "hook only queues input and does not open UI or read the clipboard");
