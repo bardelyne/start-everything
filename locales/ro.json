@@ -140,6 +140,11 @@
     "CopyDetails": "Copiază detaliile",
     "ManageInstalled": "Gestionează în Aplicații instalate",
     "InstalledApp": "Aplicație instalată",
-    "InstalledApps": "Aplicații instalate"
+    "InstalledApps": "Aplicații instalate",
+    "MainPackage": "Pachet principal",
+    "FrameworkPackage": "Pachet de framework",
+    "ResourcePackage": "Pachet de resurse",
+    "PackageBundle": "Colecție de pachete",
+    "OptionalPackage": "Pachet opțional"
   }
 }

@@ -140,6 +140,11 @@
     "CopyDetails": "বিস্তারিত কপি করুন",
     "ManageInstalled": "ইনস্টল করা অ্যাপে পরিচালনা করুন",
     "InstalledApp": "ইনস্টল করা অ্যাপ",
-    "InstalledApps": "ইনস্টল করা অ্যাপ"
+    "InstalledApps": "ইনস্টল করা অ্যাপ",
+    "MainPackage": "মূল প্যাকেজ",
+    "FrameworkPackage": "ফ্রেমওয়ার্ক প্যাকেজ",
+    "ResourcePackage": "রিসোর্স প্যাকেজ",
+    "PackageBundle": "প্যাকেজ বান্ডল",
+    "OptionalPackage": "ঐচ্ছিক প্যাকেজ"
   }
 }

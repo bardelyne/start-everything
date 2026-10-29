@@ -140,6 +140,11 @@
     "CopyDetails": "Salin detail",
     "ManageInstalled": "Kelola di Aplikasi terinstal",
     "InstalledApp": "Aplikasi terinstal",
-    "InstalledApps": "Aplikasi terinstal"
+    "InstalledApps": "Aplikasi terinstal",
+    "MainPackage": "Paket utama",
+    "FrameworkPackage": "Paket kerangka kerja",
+    "ResourcePackage": "Paket sumber daya",
+    "PackageBundle": "Bundel paket",
+    "OptionalPackage": "Paket opsional"
   }
 }

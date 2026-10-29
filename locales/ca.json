@@ -140,6 +140,11 @@
     "CopyDetails": "Copia els detalls",
     "ManageInstalled": "Gestiona a Aplicacions instal·lades",
     "InstalledApp": "Aplicació instal·lada",
-    "InstalledApps": "Aplicacions instal·lades"
+    "InstalledApps": "Aplicacions instal·lades",
+    "MainPackage": "Paquet principal",
+    "FrameworkPackage": "Paquet de marc de treball",
+    "ResourcePackage": "Paquet de recursos",
+    "PackageBundle": "Conjunt de paquets",
+    "OptionalPackage": "Paquet opcional"
   }
 }

@@ -140,6 +140,11 @@
     "CopyDetails": "複製詳細資料",
     "ManageInstalled": "在已安裝的應用程式中管理",
     "InstalledApp": "已安裝的應用程式",
-    "InstalledApps": "已安裝的應用程式"
+    "InstalledApps": "已安裝的應用程式",
+    "MainPackage": "主要套件",
+    "FrameworkPackage": "架構套件",
+    "ResourcePackage": "資源套件",
+    "PackageBundle": "套件組合",
+    "OptionalPackage": "選用套件"
   }
 }

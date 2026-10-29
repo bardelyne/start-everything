@@ -140,6 +140,11 @@
     "CopyDetails": "Kopioi tiedot",
     "ManageInstalled": "Hallitse asennetuissa sovelluksissa",
     "InstalledApp": "Asennettu sovellus",
-    "InstalledApps": "Asennetut sovellukset"
+    "InstalledApps": "Asennetut sovellukset",
+    "MainPackage": "Pääpaketti",
+    "FrameworkPackage": "Sovelluskehyspaketti",
+    "ResourcePackage": "Resurssipaketti",
+    "PackageBundle": "Pakettikokoelma",
+    "OptionalPackage": "Valinnainen paketti"
   }
 }

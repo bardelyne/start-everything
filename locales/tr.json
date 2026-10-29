@@ -140,6 +140,11 @@
     "CopyDetails": "Ayrıntıları kopyala",
     "ManageInstalled": "Yüklü uygulamalarda yönet",
     "InstalledApp": "Yüklü uygulama",
-    "InstalledApps": "Yüklü uygulamalar"
+    "InstalledApps": "Yüklü uygulamalar",
+    "MainPackage": "Ana paket",
+    "FrameworkPackage": "Çerçeve paketi",
+    "ResourcePackage": "Kaynak paketi",
+    "PackageBundle": "Paket grubu",
+    "OptionalPackage": "İsteğe bağlı paket"
   }
 }

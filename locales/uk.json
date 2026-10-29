@@ -140,6 +140,11 @@
     "CopyDetails": "Копіювати відомості",
     "ManageInstalled": "Керувати у встановлених програмах",
     "InstalledApp": "Установлена програма",
-    "InstalledApps": "Інстальовані програми"
+    "InstalledApps": "Інстальовані програми",
+    "MainPackage": "Основний пакет",
+    "FrameworkPackage": "Пакет платформи",
+    "ResourcePackage": "Пакет ресурсів",
+    "PackageBundle": "Набір пакетів",
+    "OptionalPackage": "Додатковий пакет"
   }
 }

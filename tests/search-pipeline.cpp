@@ -88,7 +88,7 @@ struct App {
     bool installedOnly = false,inventoryOnly=false;
     bool targetExists=false,linkExists=false;
     std::wstring installedId,installedName,installedPublisher,installedVersion,installedPackage;
-    std::wstring installedLocation,installedFamily,installedKey,installedArchitecture;HKEY installedHive=nullptr;REGSAM installedView=0;
+    std::wstring installedLocation,installedFamily,installedKey,installedArchitecture,installedPackageType,installedResourceId;HKEY installedHive=nullptr;REGSAM installedView=0;
     std::unique_ptr<ITEMIDLIST, PidlFree> pidl;
 };
 const std::wstring& IconIdentity(const App& app){return app.installedOnly?app.installedId:app.name;}
@@ -111,6 +111,8 @@ public:
         apps.push_back(std::move(suite));
         for(int i=0;i<70;++i){
             App app;app.name=L"Package "+std::to_wstring(100+i);app.nameLower=tools::ToLower(app.name);
+            if(i==0){app.installedPackageType=L"Resource package";app.installedResourceId=L"split.scale-150";}
+            if(i==1)app.installedPackageType=L"Package bundle";
             app.installedName=app.name;app.installedId=app.name;app.installedOnly=true;app.inventoryOnly=true;
             app.targetPath=L"ms-settings:appsfeatures";app.installedPackage=app.name+L"_1.0.0.0_x64__1234567890123";
             apps.push_back(std::move(app));
@@ -191,6 +193,7 @@ void Wake(){}
 namespace i18n {
 enum class Key { NoNetwork, CheckNetwork, Subnet, Gateway, CopyHint, OpenService, SearchWeb, SearchService, InstalledApps, NoApps, Next, Shown };
 const wchar_t* Text(Key) { return L"test"; }
+std::wstring Label(std::wstring_view text) { return std::wstring(text); }
 std::wstring Format(Key, std::initializer_list<std::wstring>) { return L"test"; }
 }
 struct ResolvedWebQuery { std::wstring queryTerm, serviceName, homeUrl, searchUrl; bool isShortcut = false; };
@@ -468,6 +471,12 @@ int main() {
     std::vector<Row> initial;
     {std::lock_guard lock(observedMutex);initial=seenApps.back().rows;
      Check(initial.size()==20 && initial[0].installedTotal==71,"inventory starts with exactly 20 entries and the full matching count");
+     const auto resource=std::find_if(initial.begin(),initial.end(),[](const auto& row){return row.title==L"Package 100";});
+     const auto bundle=std::find_if(initial.begin(),initial.end(),[](const auto& row){return row.title==L"Package 101";});
+     Check(resource!=initial.end() && resource->subtitle.starts_with(L"Resource package \u00B7 split.scale-150"),
+           "resource rows visibly identify their package type and exact scale/language identity");
+     Check(bundle!=initial.end() && bundle->subtitle.starts_with(L"Package bundle") && bundle->installedProtected,
+           "bundle rows are distinguishable while their read-only protection stays intact");
      Check(std::all_of(initial.begin(),initial.end(),[](const auto& row){return row.installedOnly && !row.canRunAsAdmin && !row.isFile;}),"inventory never creates launch or administrator targets");}
     Check(!InstalledNearEnd(0,600,1400) && !InstalledNearEnd(100,600,1400),"scrolling near the top does not eagerly load the full inventory");
     Check(InstalledNearEnd(700,600,1400) && InstalledNearEnd(800,600,1400),"approaching the bottom triggers the next batch");

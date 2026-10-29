@@ -140,6 +140,11 @@
     "CopyDetails": "詳細をコピー",
     "ManageInstalled": "インストールされているアプリで管理",
     "InstalledApp": "インストール済みアプリ",
-    "InstalledApps": "インストールされているアプリ"
+    "InstalledApps": "インストールされているアプリ",
+    "MainPackage": "メインパッケージ",
+    "FrameworkPackage": "フレームワークパッケージ",
+    "ResourcePackage": "リソースパッケージ",
+    "PackageBundle": "パッケージバンドル",
+    "OptionalPackage": "オプションパッケージ"
   }
 }

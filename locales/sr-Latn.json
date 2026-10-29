@@ -140,6 +140,11 @@
     "CopyDetails": "Kopiraj detalje",
     "ManageInstalled": "Upravljaj instaliranim aplikacijama",
     "InstalledApp": "Instalirana aplikacija",
-    "InstalledApps": "Instalirane aplikacije"
+    "InstalledApps": "Instalirane aplikacije",
+    "MainPackage": "Glavni paket",
+    "FrameworkPackage": "Paket radnog okvira",
+    "ResourcePackage": "Paket resursa",
+    "PackageBundle": "Skup paketa",
+    "OptionalPackage": "Opcioni paket"
   }
 }

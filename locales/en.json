@@ -140,6 +140,11 @@
     "CopyDetails": "Copy details",
     "ManageInstalled": "Manage in Installed apps",
     "InstalledApp": "Installed app",
-    "InstalledApps": "Installed apps"
+    "InstalledApps": "Installed apps",
+    "MainPackage": "Main package",
+    "FrameworkPackage": "Framework package",
+    "ResourcePackage": "Resource package",
+    "PackageBundle": "Package bundle",
+    "OptionalPackage": "Optional package"
   }
 }

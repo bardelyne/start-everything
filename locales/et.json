@@ -140,6 +140,11 @@
     "CopyDetails": "Kopeeri üksikasjad",
     "ManageInstalled": "Halda installitud rakendustes",
     "InstalledApp": "Installitud rakendus",
-    "InstalledApps": "Installitud rakendused"
+    "InstalledApps": "Installitud rakendused",
+    "MainPackage": "Põhipakett",
+    "FrameworkPackage": "Raamistikupakett",
+    "ResourcePackage": "Ressursipakett",
+    "PackageBundle": "Paketikogum",
+    "OptionalPackage": "Valikuline pakett"
   }
 }

@@ -140,6 +140,11 @@
     "CopyDetails": "Kopieer besonderhede",
     "ManageInstalled": "Bestuur in Geïnstalleerde programme",
     "InstalledApp": "Geïnstalleerde toepassing",
-    "InstalledApps": "Geïnstalleerde toepassings"
+    "InstalledApps": "Geïnstalleerde toepassings",
+    "MainPackage": "Hoofpakket",
+    "FrameworkPackage": "Raamwerkpakket",
+    "ResourcePackage": "Hulpbronpakket",
+    "PackageBundle": "Pakketbundel",
+    "OptionalPackage": "Opsionele pakket"
   }
 }

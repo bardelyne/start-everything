@@ -140,6 +140,11 @@
     "CopyDetails": "Afrita upplýsingar",
     "ManageInstalled": "Stjórna í Uppsett forrit",
     "InstalledApp": "Uppsett forrit",
-    "InstalledApps": "Uppsett forrit"
+    "InstalledApps": "Uppsett forrit",
+    "MainPackage": "Aðalpakki",
+    "FrameworkPackage": "Rammapakki",
+    "ResourcePackage": "Tilfangapakki",
+    "PackageBundle": "Pakkasafn",
+    "OptionalPackage": "Valfrjáls pakki"
   }
 }

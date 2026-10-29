@@ -140,6 +140,11 @@
     "CopyDetails": "Salin butiran",
     "ManageInstalled": "Urus dalam Aplikasi dipasang",
     "InstalledApp": "Aplikasi dipasang",
-    "InstalledApps": "Aplikasi dipasang"
+    "InstalledApps": "Aplikasi dipasang",
+    "MainPackage": "Pakej utama",
+    "FrameworkPackage": "Pakej rangka kerja",
+    "ResourcePackage": "Pakej sumber",
+    "PackageBundle": "Himpunan pakej",
+    "OptionalPackage": "Pakej pilihan"
   }
 }

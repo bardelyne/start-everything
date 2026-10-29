@@ -140,6 +140,11 @@
     "CopyDetails": "Kopēt informāciju",
     "ManageInstalled": "Pārvaldīt instalētajās programmās",
     "InstalledApp": "Instalēta programma",
-    "InstalledApps": "Instalētās programmas"
+    "InstalledApps": "Instalētās programmas",
+    "MainPackage": "Galvenā pakotne",
+    "FrameworkPackage": "Ietvara pakotne",
+    "ResourcePackage": "Resursu pakotne",
+    "PackageBundle": "Pakotņu kopa",
+    "OptionalPackage": "Neobligāta pakotne"
   }
 }

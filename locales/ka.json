@@ -140,6 +140,11 @@
     "CopyDetails": "დეტალების კოპირება",
     "ManageInstalled": "მართვა დაინსტალირებულ აპებში",
     "InstalledApp": "დაყენებული აპი",
-    "InstalledApps": "დაინსტალირებული აპები"
+    "InstalledApps": "დაინსტალირებული აპები",
+    "MainPackage": "მთავარი პაკეტი",
+    "FrameworkPackage": "პლატფორმის პაკეტი",
+    "ResourcePackage": "რესურსების პაკეტი",
+    "PackageBundle": "პაკეტების ნაკრები",
+    "OptionalPackage": "არასავალდებულო პაკეტი"
   }
 }

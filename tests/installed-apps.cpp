@@ -273,8 +273,11 @@ int main(){
     Check(std::any_of(packages.begin(),packages.end(),[](const auto& record){return record.inventoryOnly;}),
           "native current-user package enumeration includes framework or system components");
     std::set<std::wstring> packageIds;
+    for(const auto& record:packages)Check(!record.packageType.empty(),"each native package carries a readable package-type label");
     for(const auto& record:packages)Check(packageIds.insert(record.packageFullName).second && record.id==L"package:"+record.packageFullName,
           "package inventory keeps distinct full package identities instead of collapsing versions by family");
+    for(const auto& record:packages)if(record.packageType==L"Resource package")
+        Check(record.inventoryOnly,"resource labels do not change protected-package removal rules");
     for(const auto& record:packages)if(!record.inventoryOnly && record.family.find(L"WinAppRuntime")!=record.family.npos){
         Check(record.name.find(L"Windows App Runtime")!=record.name.npos,"this PC's runtime package uses the same friendly application name as Windows Settings");
         Check(!record.aliases.empty(),"technical runtime name is kept as a search alias");

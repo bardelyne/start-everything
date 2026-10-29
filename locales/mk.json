@@ -140,6 +140,11 @@
     "CopyDetails": "Копирај детали",
     "ManageInstalled": "Управувај во инсталираните апликации",
     "InstalledApp": "Инсталирана апликација",
-    "InstalledApps": "Инсталирани апликации"
+    "InstalledApps": "Инсталирани апликации",
+    "MainPackage": "Главен пакет",
+    "FrameworkPackage": "Пакет на рамковна околина",
+    "ResourcePackage": "Пакет со ресурси",
+    "PackageBundle": "Збирка пакети",
+    "OptionalPackage": "Изборен пакет"
   }
 }

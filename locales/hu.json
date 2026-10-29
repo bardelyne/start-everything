@@ -140,6 +140,11 @@
     "CopyDetails": "Részletek másolása",
     "ManageInstalled": "Kezelés a telepített alkalmazásoknál",
     "InstalledApp": "Telepített alkalmazás",
-    "InstalledApps": "Telepített alkalmazások"
+    "InstalledApps": "Telepített alkalmazások",
+    "MainPackage": "Fő csomag",
+    "FrameworkPackage": "Keretrendszercsomag",
+    "ResourcePackage": "Erőforráscsomag",
+    "PackageBundle": "Csomagköteg",
+    "OptionalPackage": "Választható csomag"
   }
 }

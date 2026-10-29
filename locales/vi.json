@@ -140,6 +140,11 @@
     "CopyDetails": "Sao chép chi tiết",
     "ManageInstalled": "Quản lý trong Ứng dụng đã cài đặt",
     "InstalledApp": "Ứng dụng đã cài đặt",
-    "InstalledApps": "Ứng dụng đã cài đặt"
+    "InstalledApps": "Ứng dụng đã cài đặt",
+    "MainPackage": "Gói chính",
+    "FrameworkPackage": "Gói nền tảng",
+    "ResourcePackage": "Gói tài nguyên",
+    "PackageBundle": "Bộ gói",
+    "OptionalPackage": "Gói tùy chọn"
   }
 }

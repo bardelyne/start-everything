@@ -140,6 +140,11 @@
     "CopyDetails": "Nakili maelezo",
     "ManageInstalled": "Dhibiti katika Programu zilizosakinishwa",
     "InstalledApp": "Programu iliyosakinishwa",
-    "InstalledApps": "Programu zilizosakinishwa"
+    "InstalledApps": "Programu zilizosakinishwa",
+    "MainPackage": "Kifurushi kikuu",
+    "FrameworkPackage": "Kifurushi cha mfumo",
+    "ResourcePackage": "Kifurushi cha rasilimali",
+    "PackageBundle": "Kundi la vifurushi",
+    "OptionalPackage": "Kifurushi cha hiari"
   }
 }

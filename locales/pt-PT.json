@@ -140,6 +140,11 @@
     "CopyDetails": "Copiar detalhes",
     "ManageInstalled": "Gerir em Aplicações instaladas",
     "InstalledApp": "Aplicação instalada",
-    "InstalledApps": "Aplicações instaladas"
+    "InstalledApps": "Aplicações instaladas",
+    "MainPackage": "Pacote principal",
+    "FrameworkPackage": "Pacote de framework",
+    "ResourcePackage": "Pacote de recursos",
+    "PackageBundle": "Conjunto de pacotes",
+    "OptionalPackage": "Pacote opcional"
   }
 }

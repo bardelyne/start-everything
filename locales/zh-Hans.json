@@ -140,6 +140,11 @@
     "CopyDetails": "复制详细信息",
     "ManageInstalled": "在已安装的应用中管理",
     "InstalledApp": "已安装的应用",
-    "InstalledApps": "已安装的应用"
+    "InstalledApps": "已安装的应用",
+    "MainPackage": "主程序包",
+    "FrameworkPackage": "框架程序包",
+    "ResourcePackage": "资源程序包",
+    "PackageBundle": "程序包捆绑包",
+    "OptionalPackage": "可选程序包"
   }
 }

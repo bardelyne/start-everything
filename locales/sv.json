@@ -140,6 +140,11 @@
     "CopyDetails": "Kopiera information",
     "ManageInstalled": "Hantera i Installerade appar",
     "InstalledApp": "Installerad app",
-    "InstalledApps": "Installerade appar"
+    "InstalledApps": "Installerade appar",
+    "MainPackage": "Huvudpaket",
+    "FrameworkPackage": "Ramverkspaket",
+    "ResourcePackage": "Resurspaket",
+    "PackageBundle": "Paketpaket",
+    "OptionalPackage": "Valfritt paket"
   }
 }

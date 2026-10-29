@@ -140,6 +140,11 @@
     "CopyDetails": "คัดลอกรายละเอียด",
     "ManageInstalled": "จัดการในแอปที่ติดตั้ง",
     "InstalledApp": "แอปที่ติดตั้ง",
-    "InstalledApps": "แอปที่ติดตั้ง"
+    "InstalledApps": "แอปที่ติดตั้ง",
+    "MainPackage": "แพ็กเกจหลัก",
+    "FrameworkPackage": "แพ็กเกจเฟรมเวิร์ก",
+    "ResourcePackage": "แพ็กเกจทรัพยากร",
+    "PackageBundle": "ชุดแพ็กเกจ",
+    "OptionalPackage": "แพ็กเกจเสริม"
   }
 }

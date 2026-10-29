@@ -140,6 +140,11 @@
     "CopyDetails": "Kopjo hollësitë",
     "ManageInstalled": "Menaxho te aplikacionet e instaluara",
     "InstalledApp": "Aplikacion i instaluar",
-    "InstalledApps": "Aplikacionet e instaluara"
+    "InstalledApps": "Aplikacionet e instaluara",
+    "MainPackage": "Paketa kryesore",
+    "FrameworkPackage": "Paketë platforme",
+    "ResourcePackage": "Paketë burimesh",
+    "PackageBundle": "Grup paketash",
+    "OptionalPackage": "Paketë opsionale"
   }
 }

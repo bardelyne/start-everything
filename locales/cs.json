@@ -140,6 +140,11 @@
     "CopyDetails": "Kopírovat podrobnosti",
     "ManageInstalled": "Spravovat v nainstalovaných aplikacích",
     "InstalledApp": "Nainstalovaná aplikace",
-    "InstalledApps": "Nainstalované aplikace"
+    "InstalledApps": "Nainstalované aplikace",
+    "MainPackage": "Hlavní balíček",
+    "FrameworkPackage": "Balíček frameworku",
+    "ResourcePackage": "Balíček prostředků",
+    "PackageBundle": "Sada balíčků",
+    "OptionalPackage": "Volitelný balíček"
   }
 }

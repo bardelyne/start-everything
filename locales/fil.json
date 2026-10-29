@@ -140,6 +140,11 @@
     "CopyDetails": "Kopyahin ang mga detalye",
     "ManageInstalled": "Pamahalaan sa Mga naka-install na app",
     "InstalledApp": "Naka-install na app",
-    "InstalledApps": "Mga naka-install na app"
+    "InstalledApps": "Mga naka-install na app",
+    "MainPackage": "Pangunahing pakete",
+    "FrameworkPackage": "Pakete ng framework",
+    "ResourcePackage": "Pakete ng resource",
+    "PackageBundle": "Kalipunan ng mga pakete",
+    "OptionalPackage": "Opsyonal na pakete"
   }
 }

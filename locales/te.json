@@ -140,6 +140,11 @@
     "CopyDetails": "వివరాలను కాపీ చేయి",
     "ManageInstalled": "ఇన్‌స్టాల్ చేసిన యాప్‌లలో నిర్వహించు",
     "InstalledApp": "ఇన్‌స్టాల్ చేసిన యాప్",
-    "InstalledApps": "ఇన్‌స్టాల్ చేసిన యాప్‌లు"
+    "InstalledApps": "ఇన్‌స్టాల్ చేసిన యాప్‌లు",
+    "MainPackage": "ప్రధాన ప్యాకేజీ",
+    "FrameworkPackage": "ఫ్రేమ్‌వర్క్ ప్యాకేజీ",
+    "ResourcePackage": "వనరుల ప్యాకేజీ",
+    "PackageBundle": "ప్యాకేజీల సమూహం",
+    "OptionalPackage": "ఐచ్ఛిక ప్యాకేజీ"
   }
 }

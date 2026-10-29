@@ -140,6 +140,11 @@
     "CopyDetails": "세부 정보 복사",
     "ManageInstalled": "설치된 앱에서 관리",
     "InstalledApp": "설치된 앱",
-    "InstalledApps": "설치된 앱"
+    "InstalledApps": "설치된 앱",
+    "MainPackage": "기본 패키지",
+    "FrameworkPackage": "프레임워크 패키지",
+    "ResourcePackage": "리소스 패키지",
+    "PackageBundle": "패키지 번들",
+    "OptionalPackage": "선택적 패키지"
   }
 }

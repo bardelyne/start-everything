@@ -140,6 +140,11 @@
     "CopyDetails": "Kopijuoti išsamią informaciją",
     "ManageInstalled": "Tvarkyti įdiegtose programose",
     "InstalledApp": "Įdiegta programa",
-    "InstalledApps": "Įdiegtos programėlės"
+    "InstalledApps": "Įdiegtos programėlės",
+    "MainPackage": "Pagrindinis paketas",
+    "FrameworkPackage": "Sistemos bibliotekų paketas",
+    "ResourcePackage": "Išteklių paketas",
+    "PackageBundle": "Paketų rinkinys",
+    "OptionalPackage": "Pasirenkamas paketas"
   }
 }

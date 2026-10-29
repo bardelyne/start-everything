@@ -140,6 +140,11 @@
     "CopyDetails": "Պատճենել մանրամասները",
     "ManageInstalled": "Կառավարել տեղադրված հավելվածներում",
     "InstalledApp": "Տեղադրված հավելված",
-    "InstalledApps": "Տեղադրված հավելվածներ"
+    "InstalledApps": "Տեղադրված հավելվածներ",
+    "MainPackage": "Հիմնական փաթեթ",
+    "FrameworkPackage": "Հենքի փաթեթ",
+    "ResourcePackage": "Ռեսուրսների փաթեթ",
+    "PackageBundle": "Փաթեթների հավաքածու",
+    "OptionalPackage": "Լրացուցիչ փաթեթ"
   }
 }

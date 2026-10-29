@@ -140,6 +140,11 @@
     "CopyDetails": "Details kopiëren",
     "ManageInstalled": "Beheren in Geïnstalleerde apps",
     "InstalledApp": "Geïnstalleerde app",
-    "InstalledApps": "Geïnstalleerde apps"
+    "InstalledApps": "Geïnstalleerde apps",
+    "MainPackage": "Hoofdpakket",
+    "FrameworkPackage": "Frameworkpakket",
+    "ResourcePackage": "Bronnenpakket",
+    "PackageBundle": "Pakketbundel",
+    "OptionalPackage": "Optioneel pakket"
   }
 }

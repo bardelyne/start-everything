@@ -140,6 +140,11 @@
     "CopyDetails": "விவரங்களை நகலெடு",
     "ManageInstalled": "நிறுவப்பட்ட பயன்பாடுகளில் நிர்வகி",
     "InstalledApp": "நிறுவப்பட்ட செயலி",
-    "InstalledApps": "நிறுவப்பட்ட பயன்பாடுகள்"
+    "InstalledApps": "நிறுவப்பட்ட பயன்பாடுகள்",
+    "MainPackage": "முதன்மைத் தொகுப்பு",
+    "FrameworkPackage": "கட்டமைப்புத் தொகுப்பு",
+    "ResourcePackage": "வளத் தொகுப்பு",
+    "PackageBundle": "தொகுப்புகளின் தொகுதி",
+    "OptionalPackage": "விருப்பத் தொகுப்பு"
   }
 }

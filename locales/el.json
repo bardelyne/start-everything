@@ -140,6 +140,11 @@
     "CopyDetails": "Αντιγραφή λεπτομερειών",
     "ManageInstalled": "Διαχείριση στις εγκατεστημένες εφαρμογές",
     "InstalledApp": "Εγκατεστημένη εφαρμογή",
-    "InstalledApps": "Εγκατεστημένες εφαρμογές"
+    "InstalledApps": "Εγκατεστημένες εφαρμογές",
+    "MainPackage": "Κύριο πακέτο",
+    "FrameworkPackage": "Πακέτο πλαισίου",
+    "ResourcePackage": "Πακέτο πόρων",
+    "PackageBundle": "Δέσμη πακέτων",
+    "OptionalPackage": "Προαιρετικό πακέτο"
   }
 }

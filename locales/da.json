@@ -140,6 +140,11 @@
     "CopyDetails": "Kopiér detaljer",
     "ManageInstalled": "Administrer i Installerede apps",
     "InstalledApp": "Installeret app",
-    "InstalledApps": "Installerede apps"
+    "InstalledApps": "Installerede apps",
+    "MainPackage": "Hovedpakke",
+    "FrameworkPackage": "Frameworkpakke",
+    "ResourcePackage": "Ressourcepakke",
+    "PackageBundle": "Pakkesamling",
+    "OptionalPackage": "Valgfri pakke"
   }
 }
