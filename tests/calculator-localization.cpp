@@ -83,5 +83,28 @@ auto units=calc::Rows(L"100 km to mi");Check(units.size()==1&&calc::ParseNumber(
 auto temp=calc::Rows(L"0 C to F");Check(temp.size()==1&&calc::ParseNumber(temp[0].copyText,&result)&&Near(result,32),"temperature offsets preserved");
 printf("STAGE basic calculations passed\n");unsigned conversionChecks=0;for(auto const& from:calc::kUnits)for(auto const& to:calc::kUnits){if(wcscmp(from.kind,to.kind)||calc::FindUnit(from.symbol)!=&from||calc::FindUnit(to.symbol)!=&to)continue;for(double n:{0.0,1.0,-12.5,1000.0}){std::vector<Row> rows;Check(calc::ConversionRows(n,std::wstring(from.symbol)+L" to "+to.symbol,{},&rows)&&!rows.empty(),"built-in conversion produces a row");double parsed=0;double expected=(n*from.factor+from.offset-to.offset)/to.factor;{bool parsedOk=calc::ParseNumber(rows.back().copyText,&parsed)!=0;if(!parsedOk||!Near(parsed,expected))printf("CONVERSION n=%g expected=%.15g got=%.15g from=%ls to=%ls text=%ls\n",n,expected,parsed,from.symbol,to.symbol,rows.back().copyText.c_str());Check(parsedOk&&Near(parsed,expected),"built-in conversion has correct numeric value");}++conversionChecks;}}
 printf("STAGE built-in conversions complete\n");g_settings.unitConversions={{L"smoot",L"m",L"{n}*1.7018",L"Length",true}};auto custom=calc::Rows(L"2 smoot");bool customGood=false;for(auto const& row:custom)if(row.copyText.find(L"m")!=std::wstring::npos&&calc::ParseNumber(row.copyText,&result)&&Near(result,3.4036))customGood=true;Check(customGood,"custom formula conversion still works");
+auto scientificRows=calc::Rows(L"10^3*99");
+Check(scientificRows.size()==2 && scientificRows[0].copyText==L"99000" &&
+      (scientificRows[1].copyText==L"9.9e4" || scientificRows[1].copyText==L"9,9e4"),
+      "issue 5993: show ordinary and scientific results together");
+auto groupedRows=calc::Rows(L"2047 to bin");
+Check(groupedRows.size()==1 && groupedRows[0].title.find(L"0b111 1111 1111")!=std::wstring::npos,
+      "issue 5999: binary output groups digits from the right");
+auto caseRows=calc::Rows(L"0 \u00B0C to \u00B0F");
+Check(caseRows.size()==1 && caseRows[0].title==L"0 \u00B0C = 32 \u00B0F",
+      "issue 5988: built-in unit symbols retain their proper capitalization");
+auto lengthRows=calc::Rows(L"100 km to mi");
+Check(!lengthRows.empty() && !caseRows.empty() && lengthRows[0].glyphColor && caseRows[0].glyphColor &&
+      lengthRows[0].glyphColor!=caseRows[0].glyphColor,
+      "issue 5996: different conversion categories have distinct icon colors");
+g_settings.unitConversions={{L"TestFoO",L"TestBaR",L"{n}*2",L"Length",true}};
+auto forwardRows=calc::Rows(L"2 TestFoO"),reverseRows=calc::Rows(L"4 TestBaR");
+Check(forwardRows.size()==1 && forwardRows[0].title==L"2 TestFoO = 4 TestBaR",
+      "issue 5988: custom unit names retain configured capitalization");
+Check(reverseRows.size()==1 && reverseRows[0].title==L"4 TestBaR = 2 TestFoO",
+      "issue 5995: reciprocal custom conversion works when its option is enabled");
+g_settings.unitConversions[0].reciprocal=false;
+Check(calc::Rows(L"4 TestBaR").empty(),"reciprocal conversion respects the disabled option");
+g_settings.unitConversions.clear();
 printf("STAGE custom conversion complete\n");std::mt19937 rng(0x5345);const wchar_t* alphabet=L"0123456789+-*/^().% abcdef,x to nms";for(int i=0;i<10000;i++){std::wstring query;const auto n=rng()%128;for(unsigned j=0;j<n;j++)query+=alphabet[rng()%wcslen(alphabet)];tools::EvaluateMath(query,result);calc::Rows(query);}Check(true,"ten thousand malformed mixed queries complete without a crash");
 std::atomic<bool> parallelOk{true};std::vector<std::thread> threads;for(int i=0;i<4;i++)threads.emplace_back([&]{for(int j=0;j<1000;j++){double v;tools::EvaluateMath(nestedPct,v);if(!tools::EvaluateMath(L"6*7",v)||v!=42)parallelOk=false;}});for(auto& thread:threads)thread.join();Check(parallelOk,"parser limits remain independent across threads");printf("RESULT %u utility checks passed; %u numeric conversion cases; 10000 malformed queries\n",checks,conversionChecks);}

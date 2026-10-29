@@ -140,6 +140,7 @@
     "CopyDetails": "Copiar detalles",
     "NotLaunchable": "No se encontró un iniciador",
     "ManageInstalled": "Administrar en Aplicaciones instaladas",
-    "InstalledApp": "Aplicación instalada"
+    "InstalledApp": "Aplicación instalada",
+    "InstalledApps": "Aplicaciones instaladas"
   }
 }

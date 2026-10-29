@@ -140,6 +140,7 @@
     "CopyDetails": "Részletek másolása",
     "NotLaunchable": "Nem található indító",
     "ManageInstalled": "Kezelés a telepített alkalmazásoknál",
-    "InstalledApp": "Telepített alkalmazás"
+    "InstalledApp": "Telepített alkalmazás",
+    "InstalledApps": "Telepített alkalmazások"
   }
 }

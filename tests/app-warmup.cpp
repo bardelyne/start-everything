@@ -21,7 +21,7 @@ std::mutex gate;
 std::condition_variable gateWake;
 bool blocked=false,entered=false,fail=false,throws=false;
 std::atomic<int> rebuilds{0};
-struct App {std::wstring name=L"test";bool isSetting=false;void* pidl=nullptr;};
+struct App {std::wstring name=L"test";bool isSetting=false,installedOnly=false;void* pidl=nullptr;};
 const std::wstring& IconIdentity(const App& app){return app.name;}
 struct Index {
     bool Rebuild(const std::atomic<bool>* cancel = nullptr){

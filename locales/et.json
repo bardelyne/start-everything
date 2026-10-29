@@ -140,6 +140,7 @@
     "CopyDetails": "Kopeeri üksikasjad",
     "NotLaunchable": "Käivitajat ei leitud",
     "ManageInstalled": "Halda installitud rakendustes",
-    "InstalledApp": "Installitud rakendus"
+    "InstalledApp": "Installitud rakendus",
+    "InstalledApps": "Installitud rakendused"
   }
 }

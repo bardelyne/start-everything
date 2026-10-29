@@ -140,6 +140,7 @@
     "CopyDetails": "Kopier detaljer",
     "NotLaunchable": "Ingen oppstartssnarvei funnet",
     "ManageInstalled": "Administrer i Installerte apper",
-    "InstalledApp": "Installert app"
+    "InstalledApp": "Installert app",
+    "InstalledApps": "Installerte apper"
   }
 }

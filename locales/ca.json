@@ -140,6 +140,7 @@
     "CopyDetails": "Copia els detalls",
     "NotLaunchable": "No s’ha trobat cap iniciador",
     "ManageInstalled": "Gestiona a Aplicacions instal·lades",
-    "InstalledApp": "Aplicació instal·lada"
+    "InstalledApp": "Aplicació instal·lada",
+    "InstalledApps": "Aplicacions instal·lades"
   }
 }

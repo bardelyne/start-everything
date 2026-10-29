@@ -140,6 +140,7 @@
     "CopyDetails": "Kopijuoti išsamią informaciją",
     "NotLaunchable": "Paleidimo priemonė nerasta",
     "ManageInstalled": "Tvarkyti įdiegtose programose",
-    "InstalledApp": "Įdiegta programa"
+    "InstalledApp": "Įdiegta programa",
+    "InstalledApps": "Įdiegtos programėlės"
   }
 }

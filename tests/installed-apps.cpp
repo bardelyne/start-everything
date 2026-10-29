@@ -50,8 +50,15 @@ namespace native {void AddAliases(std::vector<std::wstring>& values,const std::w
 // PRODUCTION_UNINSTALL
 DWORD catalogAttributeProbes = 0;
 DWORD CatalogAttributes(LPCWSTR path) { ++catalogAttributeProbes; return GetFileAttributesW(path); }
+bool blockAppsFolder=false;
+HRESULT CatalogShellItem(PCWSTR path,IBindCtx* context,REFIID iid,void** result) {
+    if(blockAppsFolder && std::wstring_view(path)==L"shell:AppsFolder"){*result=nullptr;return E_ACCESSDENIED;}
+    return SHCreateItemFromParsingName(path,context,iid,result);
+}
 #define GetFileAttributesW CatalogAttributes
+#define SHCreateItemFromParsingName CatalogShellItem
 // PRODUCTION_APPS
+#undef SHCreateItemFromParsingName
 #undef GetFileAttributesW
 // PRODUCTION_PACKAGE_ICON
 int checks=0;
@@ -171,6 +178,34 @@ int main(){
     Check(apps::ScoreApp(office,L"en-us")>=0 && apps::ScoreApp(office,L"en-us")<80,"suite language suffix is discoverable as a real name match");
     Check(!apps::SameResult(entries[4],entries[5]) && apps::SameResult(entries[4],entries[4]),"distinct installed registrations retain separate result identities");
     Check(apps::IconIdentity(entries[4])!=apps::IconIdentity(entries[5]),"versioned products do not share cached icons just because their captions match");
+    {
+        auto settings=Launchable(L"Runtime settings",L"ms-settings:appsfeatures");settings.isSetting=true;
+        entries.push_back(std::move(settings));
+        installed::Record component;component.id=L"hidden-component";component.name=L"Hidden Runtime";component.inventoryOnly=true;
+        component.launcher=L"C:\\Apps\\NeverRunThis.exe";
+        apps::AppendInstalled(entries,{component});
+        Check(entries.back().installedOnly && entries.back().inventoryOnly && !entries.back().pidl,
+              "hidden components cannot acquire a guessed launch target");
+        auto normal=apps::MatchCatalog(entries,L"runtime",100,nullptr,apps::SearchScope::Normal);
+        Check(normal.size()==1 && normal[0].app->isSetting,"normal search keeps Settings and excludes installed-only and hidden components");
+        auto inventory=apps::MatchCatalog(entries,L"runtime",100,nullptr,apps::SearchScope::Installed);
+        Check(inventory.size()==3 && std::none_of(inventory.begin(),inventory.end(),[](const auto& hit){return hit.app->isSetting;}),
+              "installed inventory includes hidden components and both runtime versions without Settings pages");
+        auto records=products;records.push_back(component);
+        auto direct=apps::InstalledInventory(records);
+        const auto all=apps::MatchCatalog(direct,L"",100,nullptr,apps::SearchScope::Installed);
+        Check(all.size()==records.size(),"empty installed inventory comes directly from all registrations and packages without AppsFolder entries");
+        Check(std::all_of(direct.begin(),direct.end(),[](const auto& app){
+            return app.installedOnly && !app.pidl && !app.targetExists && app.linkTarget.empty() && app.targetPath==L"ms-settings:appsfeatures";
+        }),"even launchable products are management-only in the installed inventory");
+        Check(apps::InstalledInventory({products[0],products[0]}).size()==1,"repeated inventory records do not create duplicate management cards");
+        Check(apps::MatchCatalog(entries,L"",100,nullptr,apps::SearchScope::Normal).empty(),"normal empty queries keep their existing suggestion path");
+        Check(apps::MatchCatalog(direct,L"en-us",100,nullptr,apps::SearchScope::Installed).size()==1,
+              "unlaunchable suite metadata is searchable in inventory");
+        Check(apps::MatchCatalog(entries,L"runtime",1,nullptr,apps::SearchScope::Installed).size()==1,
+              "inventory rendering respects the result limit without discarding catalog entries");
+        entries.pop_back();entries.pop_back();
+    }
     std::vector<apps::App> packaged;
     auto executable=Launchable(L"Executable launcher",L"C:\\Apps\\Store.exe");
     executable.shellIdentity=L"Family_1234567890123!App";
@@ -221,7 +256,12 @@ int main(){
     Check(!programs.empty(),"read-only native enumeration includes registered installed programs");
     Check(std::all_of(programs.begin(),programs.end(),[](const auto& product){return !product.id.empty() && !product.name.empty();}),"native program records carry stable names and identities");
     size_t checkedLogos=0;
-    for(const auto& record:packages)if(record.family.find(L"WinAppRuntime")!=record.family.npos){
+    Check(std::any_of(packages.begin(),packages.end(),[](const auto& record){return record.inventoryOnly;}),
+          "native current-user package enumeration includes framework or system components");
+    std::set<std::wstring> packageIds;
+    for(const auto& record:packages)Check(packageIds.insert(record.packageFullName).second && record.id==L"package:"+record.packageFullName,
+          "package inventory keeps distinct full package identities instead of collapsing versions by family");
+    for(const auto& record:packages)if(!record.inventoryOnly && record.family.find(L"WinAppRuntime")!=record.family.npos){
         Check(record.name.find(L"Windows App Runtime")!=record.name.npos,"this PC's runtime package uses the same friendly application name as Windows Settings");
         Check(!record.aliases.empty(),"technical runtime name is kept as a search alias");
         std::vector<BYTE> pixels;
@@ -233,6 +273,12 @@ int main(){
     apps::Index index;const auto began=GetTickCount64();
     if(!index.Rebuild()){std::fprintf(stderr,"Native AppsFolder enumeration needs normal host access\n");return 2;}
     Check(index.Count()>0,"combined app index builds using real shell and installation metadata");
+    {
+        blockAppsFolder=true;apps::Index withoutShell;
+        const bool built=withoutShell.Rebuild();blockAppsFolder=false;
+        Check(built && !withoutShell.Search(L"",1000,nullptr,apps::SearchScope::Installed).empty(),
+              "installed inventory still builds when AppsFolder is unavailable");
+    }
     for(size_t i=0;i<index.Count();++i) {
         const auto* app=index.At(i);
         if(!app->installedOnly && !app->installedId.empty())
@@ -272,16 +318,18 @@ int main(){
     Check(warmer.Start(),"real native app catalog can warm without creating the search UI");
     auto warmed=warmer.Take();
     Check(warmed.index && warmed.builtAt && warmed.index->Count()>0,"native PIDL and Settings data transfer from the warmup apartment to the search owner");
-    Check(!warmed.index->Search(L"en-us",100,nullptr).empty(),"transferred catalog remains searchable without a second rebuild");
+    Check(!warmed.index->Search(L"en-us",100,nullptr,apps::SearchScope::Installed).empty(),"transferred inventory remains searchable without a second rebuild");
     auto refreshed=warmed.index->Refreshed(true);
     Check(refreshed && refreshed!=warmed.index && refreshed->Count()>0,"a native catalog replacement builds independently with an explicit installed-metadata invalidation");
-    Check(!warmed.index->Search(L"en-us",100,nullptr).empty() && !refreshed->Search(L"en-us",100,nullptr).empty(),"both old and refreshed native snapshots keep valid app identities and PIDLs");
+    Check(!warmed.index->Search(L"en-us",100,nullptr,apps::SearchScope::Installed).empty() && !refreshed->Search(L"en-us",100,nullptr,apps::SearchScope::Installed).empty(),"both old and refreshed native snapshots keep valid inventory identities and PIDLs");
     warmer.Stop();
     size_t installedCount=0;
     for(size_t i=0;i<index.Count();++i){const auto* app=index.At(i);if(app->installedOnly){++installedCount;Check(app->targetPath==L"ms-settings:appsfeatures" && !app->pidl,"every installed-only native result opens management instead of an arbitrary executable");}}
     for(const auto& record:programs)if(record.name.find(L"Microsoft 365 Apps for enterprise")!=std::wstring::npos){
-        const auto matches=index.Search(L"en-us",100,nullptr);
+        const auto matches=index.Search(L"en-us",100,nullptr,apps::SearchScope::Installed);
         Check(std::any_of(matches.begin(),matches.end(),[&](const auto& match){return match.app->name==record.name && match.app->installedOnly;}),"this PC's Microsoft 365 en-us suite is present in search");
+        const auto ordinary=index.Search(L"en-us",100,nullptr);
+        Check(std::none_of(ordinary.begin(),ordinary.end(),[&](const auto& match){return match.app->installedId==record.id;}),"this PC's installed-only Office suite no longer clutters normal search");
         std::puts("Verified Microsoft 365 en-us suite as an installed-only search result");
     }
     for(const auto& match:index.Suggest(1000,nullptr))Check(!match.app->installedOnly,"launch suggestions remain actual launch entries");

@@ -140,6 +140,7 @@
     "CopyDetails": "세부 정보 복사",
     "NotLaunchable": "실행 경로를 찾지 못함",
     "ManageInstalled": "설치된 앱에서 관리",
-    "InstalledApp": "설치된 앱"
+    "InstalledApp": "설치된 앱",
+    "InstalledApps": "설치된 앱"
   }
 }

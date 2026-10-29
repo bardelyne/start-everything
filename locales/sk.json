@@ -140,6 +140,7 @@
     "CopyDetails": "Kopírovať podrobnosti",
     "NotLaunchable": "Spúšťač sa nenašiel",
     "ManageInstalled": "Spravovať v nainštalovaných aplikáciách",
-    "InstalledApp": "Nainštalovaná aplikácia"
+    "InstalledApp": "Nainštalovaná aplikácia",
+    "InstalledApps": "Nainštalované aplikácie"
   }
 }

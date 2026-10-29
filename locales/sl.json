@@ -140,6 +140,7 @@
     "CopyDetails": "Kopiraj podrobnosti",
     "NotLaunchable": "Zaganjalnik ni bil najden",
     "ManageInstalled": "Upravljaj v nameščenih aplikacijah",
-    "InstalledApp": "Nameščena aplikacija"
+    "InstalledApp": "Nameščena aplikacija",
+    "InstalledApps": "Nameščene aplikacije"
   }
 }

@@ -140,6 +140,7 @@
     "CopyDetails": "Kopēt informāciju",
     "NotLaunchable": "Palaidējs nav atrasts",
     "ManageInstalled": "Pārvaldīt instalētajās programmās",
-    "InstalledApp": "Instalēta programma"
+    "InstalledApp": "Instalēta programma",
+    "InstalledApps": "Instalētās programmas"
   }
 }

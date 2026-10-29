@@ -140,6 +140,7 @@
     "CopyDetails": "Kopiér detaljer",
     "NotLaunchable": "Ingen startgenvej fundet",
     "ManageInstalled": "Administrer i Installerede apps",
-    "InstalledApp": "Installeret app"
+    "InstalledApp": "Installeret app",
+    "InstalledApps": "Installerede apps"
   }
 }

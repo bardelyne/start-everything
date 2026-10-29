@@ -140,6 +140,7 @@
     "CopyDetails": "Kopírovat podrobnosti",
     "NotLaunchable": "Spouštěč nenalezen",
     "ManageInstalled": "Spravovat v nainstalovaných aplikacích",
-    "InstalledApp": "Nainstalovaná aplikace"
+    "InstalledApp": "Nainstalovaná aplikace",
+    "InstalledApps": "Nainstalované aplikace"
   }
 }

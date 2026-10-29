@@ -140,6 +140,7 @@
     "CopyDetails": "Kopiuj szczegóły",
     "NotLaunchable": "Nie znaleziono programu uruchamiającego",
     "ManageInstalled": "Zarządzaj w Zainstalowanych aplikacjach",
-    "InstalledApp": "Zainstalowana aplikacja"
+    "InstalledApp": "Zainstalowana aplikacja",
+    "InstalledApps": "Zainstalowane aplikacje"
   }
 }

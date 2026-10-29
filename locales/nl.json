@@ -140,6 +140,7 @@
     "CopyDetails": "Details kopiëren",
     "NotLaunchable": "Geen startpunt gevonden",
     "ManageInstalled": "Beheren in Geïnstalleerde apps",
-    "InstalledApp": "Geïnstalleerde app"
+    "InstalledApp": "Geïnstalleerde app",
+    "InstalledApps": "Geïnstalleerde apps"
   }
 }

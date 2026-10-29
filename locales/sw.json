@@ -140,6 +140,7 @@
     "CopyDetails": "Nakili maelezo",
     "NotLaunchable": "Kizindua hakikupatikana",
     "ManageInstalled": "Dhibiti katika Programu zilizosakinishwa",
-    "InstalledApp": "Programu iliyosakinishwa"
+    "InstalledApp": "Programu iliyosakinishwa",
+    "InstalledApps": "Programu zilizosakinishwa"
   }
 }

@@ -140,6 +140,7 @@
     "CopyDetails": "Copier les détails",
     "NotLaunchable": "Aucun lanceur trouvé",
     "ManageInstalled": "Gérer dans Applications installées",
-    "InstalledApp": "Application installée"
+    "InstalledApp": "Application installée",
+    "InstalledApps": "Applications installées"
   }
 }

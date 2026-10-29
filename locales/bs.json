@@ -140,6 +140,7 @@
     "CopyDetails": "Kopiraj detalje",
     "NotLaunchable": "Nije pronađen pokretač",
     "ManageInstalled": "Upravljaj instaliranim aplikacijama",
-    "InstalledApp": "Instalirana aplikacija"
+    "InstalledApp": "Instalirana aplikacija",
+    "InstalledApps": "Instalirane aplikacije"
   }
 }

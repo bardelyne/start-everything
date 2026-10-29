@@ -140,6 +140,7 @@
     "CopyDetails": "বিস্তারিত কপি করুন",
     "NotLaunchable": "চালু করার উপায় পাওয়া যায়নি",
     "ManageInstalled": "ইনস্টল করা অ্যাপে পরিচালনা করুন",
-    "InstalledApp": "ইনস্টল করা অ্যাপ"
+    "InstalledApp": "ইনস্টল করা অ্যাপ",
+    "InstalledApps": "ইনস্টল করা অ্যাপ"
   }
 }

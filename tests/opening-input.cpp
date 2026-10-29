@@ -82,7 +82,11 @@ DWORD TestThread(HWND window, DWORD*) { return static_cast<DWORD>(reinterpret_ca
 BOOL TestVisible(HWND) { return visible; }
 BOOL TestPostMessage(HWND, UINT, WPARAM, LPARAM) { return wakeSucceeds; }
 HWND TestSetFocus(HWND window) { return window; }
-LRESULT TestCallNext(HHOOK, int, WPARAM, LPARAM) { return 0; }
+enum class Remap { None, VirtualKey, Unicode, Deferred, Block };
+Remap remap = Remap::None;
+int downstreamCalls = 0;
+std::vector<std::pair<WPARAM,KBDLLHOOKSTRUCT>> deferred;
+LRESULT TestCallNext(HHOOK, int, WPARAM, LPARAM);
 #define GetForegroundWindow TestForeground
 #define GetAncestor TestAncestor
 #define GetWindowThreadProcessId TestThread
@@ -118,6 +122,9 @@ void Reset(HWND window = start) {
     foreground = window;
     visible = window == host;
     nativeFocus = true;
+    remap = Remap::None;
+    downstreamCalls = 0;
+    deferred.clear();
     wakeSucceeds = true;
     g_searchWindowWindow = host;
     g_hExplorerHelperWnd = nullptr;
@@ -148,11 +155,41 @@ LRESULT Key(UINT vk, bool down = true, ULONG_PTR tag = 0, UINT scan = 0) {
     insideHook = false;
     return result;
 }
+LRESULT TestCallNext(HHOOK, int code, WPARAM message, LPARAM param) {
+    ++downstreamCalls;
+    const auto& key = *reinterpret_cast<const KBDLLHOOKSTRUCT*>(param);
+    if(code != HC_ACTION || remap == Remap::None || (key.flags & LLKHF_INJECTED) || key.vkCode != 'C')return 0;
+    if(remap == Remap::Block)return 7;
+    auto replaced=key;replaced.flags|=LLKHF_INJECTED;
+    replaced.vkCode=remap==Remap::Unicode?VK_PACKET:'D';
+    replaced.scanCode=remap==Remap::Unicode?L'\u00E9':MapVirtualKeyW('D',MAPVK_VK_TO_VSC);
+    if(remap==Remap::Deferred)deferred.push_back({message,replaced});
+    else SearchWindowKeyboardProc(HC_ACTION,message,reinterpret_cast<LPARAM>(&replaced));
+    return 1;
+}
 void Ctrl() { Key(VK_LCONTROL); }
 bool PasteQueued() {
     return g_searchWindowInputs.size() == 1 && g_searchWindowInputs[0].kind == SearchWindowInput::Paste;
 }
 int main() {
+    Reset();remap=Remap::VirtualKey;
+    Check(Key('C')==1 && Key('C',false)==1,"a physical key consumed by a remapper is not captured again");
+    Check(downstreamCalls==4 && g_searchWindowInputs.size()==1 && g_searchWindowInputs[0].text==L"d",
+          "EPKL-style C-to-D remapping buffers only D and calls each hook chain once");
+    Check(!g_searchWindowKeyState['C'] && !g_searchWindowKeyState['D'] && !g_searchWindowSwallowed['D'],
+          "replacement key releases leave no physical or injected key stuck");
+    ApplySearchWindowInput();Check(g_ourBox.Text()==L"d" && immediate==1,"the remapped opening character reaches immediate Start search");
+    Reset();remap=Remap::Unicode;Key('C');Key('C',false);ApplySearchWindowInput();
+    Check(g_ourBox.Text()==L"\u00E9" && downstreamCalls==4,"Unicode remapper output is preserved without translating the physical key");
+    Reset();remap=Remap::Deferred;Key('C');Key('C',false);
+    Check(g_searchWindowInputs.empty() && deferred.size()==2,"delayed remapper output does not leak an original opening character");
+    remap=Remap::None;
+    for(auto& event:deferred)SearchWindowKeyboardProc(HC_ACTION,event.first,reinterpret_cast<LPARAM>(&event.second));
+    ApplySearchWindowInput();Check(g_ourBox.Text()==L"d","asynchronous remapper output still opens search with the right character");
+    Reset();remap=Remap::Block;
+    Check(Key('C')==7 && g_searchWindowInputs.empty() && downstreamCalls==1,"another hook's nonzero decision is preserved exactly");
+    Reset();Key('C');Key('C',false);ApplySearchWindowInput();
+    Check(g_ourBox.Text()==L"c" && downstreamCalls==2,"unmapped opening text is captured once after other hooks allow it");
     Reset(); Ctrl();
     Check(Key('V') == 1 && PasteQueued(), "Start Ctrl+V is captured before native Start handles it");
     Check(pastes == 0 && shown == 0, "hook only queues input and does not open UI or read the clipboard");

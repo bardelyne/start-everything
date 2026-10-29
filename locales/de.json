@@ -140,6 +140,7 @@
     "CopyDetails": "Details kopieren",
     "NotLaunchable": "Kein Programmstarter gefunden",
     "ManageInstalled": "In installierten Apps verwalten",
-    "InstalledApp": "Installierte App"
+    "InstalledApp": "Installierte App",
+    "InstalledApps": "Installierte Apps"
   }
 }

@@ -140,6 +140,7 @@
     "CopyDetails": "დეტალების კოპირება",
     "NotLaunchable": "გამშვები ვერ მოიძებნა",
     "ManageInstalled": "მართვა დაინსტალირებულ აპებში",
-    "InstalledApp": "დაყენებული აპი"
+    "InstalledApp": "დაყენებული აპი",
+    "InstalledApps": "დაინსტალირებული აპები"
   }
 }

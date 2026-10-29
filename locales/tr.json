@@ -140,6 +140,7 @@
     "CopyDetails": "Ayrıntıları kopyala",
     "NotLaunchable": "Başlatıcı bulunamadı",
     "ManageInstalled": "Yüklü uygulamalarda yönet",
-    "InstalledApp": "Yüklü uygulama"
+    "InstalledApp": "Yüklü uygulama",
+    "InstalledApps": "Yüklü uygulamalar"
   }
 }

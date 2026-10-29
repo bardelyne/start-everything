@@ -1,5 +1,7 @@
 # Development checks
 
+- `node scripts/test-installed-scroll.mjs`: exercises the production inventory batch and scroll handlers with a real hidden XAML ScrollViewer. It checks 20-at-a-time loading, preserving scroll position and existing controls, ignoring duplicate in-flight requests, and resetting a changed filter. It does not attach to Explorer or alter installed programs.
+
 - `node scripts/test-settings-dispatch.mjs`: runs the production settings callback and helper message handler with a private message-only window. It verifies that catalog reads, refreshes and destruction stay on the owning thread, including queued settings changes during failed startup, a burst after destruction, and successful recreation. It touches no real app catalog, registry settings or search window.
 
 - `node scripts/test-catalog-watch.mjs`: checks change-burst coalescing and the maximum refresh delay, then runs real registry, Store/MSIX and recursive shortcut listeners in a hidden native window. It changes only a private volatile test key and temporary shortcut directory, drains in-flight callbacks on shutdown, and verifies repeated enable/disable cycles. It never installs/removes an app or changes existing Start-menu shortcuts. Normal host access is required for registry/package notifications.

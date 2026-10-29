@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cwctype>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <limits>
 #include <string>
 #include <thread>
 #include <utility>
@@ -83,14 +85,15 @@ struct PidlFree { void operator()(ITEMIDLIST* value) const { ILFree(value); } };
 struct App {
     std::wstring name, nameLower, targetPath, settingArguments, linkTarget, area;
     bool isSetting = false;
-    bool installedOnly = false;
+    bool installedOnly = false,inventoryOnly=false;
     bool targetExists=false,linkExists=false;
-    std::wstring installedId,installedPublisher,installedVersion;
+    std::wstring installedId,installedName,installedPublisher,installedVersion,installedPackage;
     std::wstring installedLocation,installedFamily,installedKey;HKEY installedHive=nullptr;REGSAM installedView=0;
     std::unique_ptr<ITEMIDLIST, PidlFree> pidl;
 };
 const std::wstring& IconIdentity(const App& app){return app.installedOnly?app.installedId:app.name;}
 struct Match { const App* app; int score = 0, rank = 0; };
+enum class SearchScope { Normal, Installed };
 class Index {
     std::vector<App> apps;
 public:
@@ -106,6 +109,12 @@ public:
         App suite;suite.name=L"Suite en-us";suite.nameLower=L"suite en-us";suite.installedOnly=true;
         suite.targetPath=L"ms-settings:appsfeatures";suite.installedId=L"product:test";suite.installedPublisher=L"Publisher";suite.installedVersion=L"1.0";suite.installedLocation=L"C:\\Program Files\\Suite";suite.installedKey=L"suite-record";suite.installedHive=HKEY_CURRENT_USER;suite.installedView=KEY_WOW64_64KEY;
         apps.push_back(std::move(suite));
+        for(int i=0;i<70;++i){
+            App app;app.name=L"Package "+std::to_wstring(100+i);app.nameLower=tools::ToLower(app.name);
+            app.installedName=app.name;app.installedId=app.name;app.installedOnly=true;app.inventoryOnly=true;
+            app.targetPath=L"ms-settings:appsfeatures";app.installedPackage=app.name+L"_1.0.0.0_x64__1234567890123";
+            apps.push_back(std::move(app));
+        }
         if(includeGamma){App added;added.name=L"Gamma";added.nameLower=L"gamma";added.targetPath=L"Gamma.exe";apps.push_back(std::move(added));}
         return true;
     }
@@ -113,9 +122,10 @@ public:
     size_t Count() const { return apps.size(); }
     const App* At(size_t i) const { return i < apps.size() ? &apps[i] : nullptr; }
     std::vector<Match> Suggest(size_t, const UsageCounts*) { return {{&apps[0]}, {&apps[1]}}; }
-    std::vector<Match> Search(const std::wstring& query, size_t, const UsageCounts*) {
+    std::vector<Match> Search(const std::wstring& query, size_t, const UsageCounts*,SearchScope scope=SearchScope::Normal) {
         std::vector<Match> matches;
-        for (const auto& app : apps) if (app.nameLower.find(tools::ToLower(query)) != std::wstring::npos) matches.push_back({&app});
+        for (const auto& app : apps) if ((scope==SearchScope::Installed?!app.installedId.empty():!app.installedOnly) &&
+            app.nameLower.find(tools::ToLower(query)) != std::wstring::npos) matches.push_back({&app});
         return matches;
     }
 };
@@ -179,7 +189,7 @@ void Schedule(std::wstring,std::wstring,uint64_t,size_t){++requests;}
 void Wake(){}
 }
 namespace i18n {
-enum class Key { NoNetwork, CheckNetwork, Subnet, Gateway, CopyHint, OpenService, SearchWeb, SearchService };
+enum class Key { NoNetwork, CheckNetwork, Subnet, Gateway, CopyHint, OpenService, SearchWeb, SearchService, InstalledApps, NoApps, Next, Shown };
 const wchar_t* Text(Key) { return L"test"; }
 std::wstring Format(Key, std::initializer_list<std::wstring>) { return L"test"; }
 }
@@ -445,8 +455,46 @@ int main() {
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows[0].title==L"services" && seenFiles.back().rows.empty(),"service cards replace apps and keep file searches off");}
     Check(services::requests.load()==1,"service enumeration is scheduled on its own worker");
     const auto suiteRevision=Queue(L"suite");
-    Check(Apps(suiteRevision) && Files(suiteRevision),"installed-only products use the normal responsive search pipeline");
+    Check(Apps(suiteRevision) && Files(suiteRevision),"normal installed-only matching completes promptly");
+    {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.empty(),"installed-only products are excluded from normal app search");}
+    const auto inventoryRevision=Queue(L"/all installed suite");
+    Check(Apps(inventoryRevision) && Files(inventoryRevision),"installed inventory publishes without waiting for file results");
     {std::lock_guard lock(observedMutex);const auto& row=seenApps.back().rows[0];Check(row.installedOnly && !row.canRunAsAdmin && !row.isFile && row.openPath==L"ms-settings:appsfeatures","installed-only products keep the explicit marker and safe management destination");Check(row.installedLocation==L"C:\\Program Files\\Suite" && row.installedKey==L"suite-record" && row.installedHive==HKEY_CURRENT_USER && row.installedView==KEY_WOW64_64KEY,"installation folder and exact registry identity reach the UI without a lookup");}
+    {std::lock_guard lock(observedMutex);Check(seenFiles.back().rows.empty(),"installed inventory performs no Everything file query");}
+    Check(!RequestMoreInstalled(L"stale inventory",1,inventoryRevision),"stale inventory scroll cannot schedule another query");
+    Check(!RequestMoreInstalled(L"/all installed suite",1,inventoryRevision),"a complete filtered inventory has nothing more to load");
+    const auto firstBatch=Queue(L"/all installed");
+    Check(Apps(firstBatch) && Files(firstBatch),"unfiltered inventory publishes its first batch");
+    std::vector<Row> initial;
+    {std::lock_guard lock(observedMutex);initial=seenApps.back().rows;
+     Check(initial.size()==20 && initial[0].installedTotal==71,"inventory starts with exactly 20 entries and the full matching count");
+     Check(std::all_of(initial.begin(),initial.end(),[](const auto& row){return row.installedOnly && !row.canRunAsAdmin && !row.isFile;}),"inventory never creates launch or administrator targets");}
+    Check(!InstalledNearEnd(0,600,1400) && !InstalledNearEnd(100,600,1400),"scrolling near the top does not eagerly load the full inventory");
+    Check(InstalledNearEnd(700,600,1400) && InstalledNearEnd(800,600,1400),"approaching the bottom triggers the next batch");
+    Check(InstalledNearEnd(0,1200,900),"a tall viewport can request enough rows to become scrollable");
+    Check(!InstalledNearEnd(0,0,1400) && !InstalledNearEnd(0,600,0) && !InstalledNearEnd(-1,600,1400) &&
+          !InstalledNearEnd(std::numeric_limits<double>::infinity(),600,1400),"unmeasured and invalid scroll metrics do not request content");
+    Check(!RequestMoreInstalled(L"/all installed",19,firstBatch),"a partial or stale visible-card count cannot advance the inventory");
+    Check(RequestMoreInstalled(L"/all installed",20,firstBatch),"the first downward scroll requests another 20 rows");
+    Check(!RequestMoreInstalled(L"/all installed",20,firstBatch),"repeated scroll events cannot duplicate an in-flight batch");
+    uint64_t secondBatch;{std::lock_guard lock(g_queryMutex);secondBatch=g_queryRevision;}
+    Check(Apps(secondBatch) && Files(secondBatch),"the second batch publishes through the existing app worker");
+    {std::lock_guard lock(observedMutex);const auto& rows=seenApps.back().rows;
+     Check(rows.size()==40,"the list grows from 20 to 40 without navigation cards");
+     Check(std::equal(initial.begin(),initial.end(),rows.begin(),[](const auto& a,const auto& b){return a.title==b.title && a.cardSignature==b.cardSignature && a.appIndex==b.appIndex && a.iconKey==b.iconKey;}),"already visible card identities stay unchanged when new rows append");
+     Check(rows.back().installedProtected && !rows.back().installedPackage.empty(),"new component rows retain protection and exact package identity");}
+    Check(RequestMoreInstalled(L"/all installed",40,secondBatch),"the next scroll requests rows 41 through 60");
+    uint64_t thirdBatch;{std::lock_guard lock(g_queryMutex);thirdBatch=g_queryRevision;}
+    Check(Apps(thirdBatch) && Files(thirdBatch),"the third batch publishes promptly");
+    Check(RequestMoreInstalled(L"/all installed",60,thirdBatch),"the last scroll requests the remaining rows");
+    uint64_t lastBatch;{std::lock_guard lock(g_queryMutex);lastBatch=g_queryRevision;}
+    Check(Apps(lastBatch) && Files(lastBatch),"the last partial batch publishes promptly");
+    {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==71 && seenFiles.back().rows.empty(),"all 71 records become visible and no Everything request is made");}
+    Check(!RequestMoreInstalled(L"/all installed",71,lastBatch),"scrolling at the real end stops requesting data");
+    const auto resetBatch=Queue(L"/all installed package");
+    {std::lock_guard lock(g_queryMutex);Check(g_installedVisibleLimit==20 && g_installedBatchQuery.empty(),"typing a new filter resets the batch size");}
+    Check(Apps(resetBatch) && Files(resetBatch),"a new inventory filter publishes promptly");
+    {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==20,"a changed filter returns to the first 20 results");}
     {std::lock_guard lock(g_settingsMutex);g_settings.commandNames.weather=L"adresse";}
     const auto conflict=Queue(L"/adresse");
     Check(Apps(conflict) && Files(conflict),"ambiguous command is handled locally");

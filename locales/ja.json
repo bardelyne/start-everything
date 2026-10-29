@@ -140,6 +140,7 @@
     "CopyDetails": "詳細をコピー",
     "NotLaunchable": "起動方法が見つかりません",
     "ManageInstalled": "インストールされているアプリで管理",
-    "InstalledApp": "インストール済みアプリ"
+    "InstalledApp": "インストール済みアプリ",
+    "InstalledApps": "インストールされているアプリ"
   }
 }

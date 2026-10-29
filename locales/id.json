@@ -140,6 +140,7 @@
     "CopyDetails": "Salin detail",
     "NotLaunchable": "Peluncur tidak ditemukan",
     "ManageInstalled": "Kelola di Aplikasi terinstal",
-    "InstalledApp": "Aplikasi terinstal"
+    "InstalledApp": "Aplikasi terinstal",
+    "InstalledApps": "Aplikasi terinstal"
   }
 }

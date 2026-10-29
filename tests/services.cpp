@@ -90,6 +90,21 @@ int main(int argc,char** argv){
         std::printf("PASS: %d read-only helper checks\n",checks);return 0;
     }
     const auto parsed=commands::Parse(L"/services audio",commands::Names{});
+    Check(commands::Parse(L"/all installed",commands::Names{}).kind==commands::Kind::Installed,
+          "the complete installed inventory has its own command");
+    Check(commands::Parse(L"/ALL\tINSTALLED office",commands::Names{}).args==L"office",
+          "installed inventory accepts case-insensitive mode and a product filter");
+    Check(commands::Parse(L"/all installedtools",commands::Names{}).args==L"installedtools",
+          "installed is stripped only as a complete argument token");
+    {auto localized=commands::Names{};localized.installed=L"全部";
+     Check(commands::Parse(L"/全部 office",localized).kind==commands::Kind::Installed,
+           "the installed inventory command can use a localized single-word name");
+     localized.services=localized.installed;
+     Check(commands::Parse(L"/全部",localized).kind==commands::Kind::Conflict,
+           "inventory command names share the existing tool collision protection");}
+    {struct Custom{std::wstring name,command;};
+     Check(commands::Parse(L"/all installed",commands::Names{},std::vector<Custom>{{L"/all installed",L"echo"}}).kind==commands::Kind::Conflict,
+           "a custom command cannot override the complete installed-inventory alias");}
     Check(parsed.kind==commands::Kind::Services && parsed.args==L"audio","services command splits its search argument");
     auto names=commands::Names{};names.services=L"服務";
     Check(commands::Parse(L"/服務 音訊",names).kind==commands::Kind::Services,"custom command name supports Unicode");
