@@ -144,7 +144,8 @@
     "MainPackage": "Huvudpaket",
     "FrameworkPackage": "Ramverkspaket",
     "ResourcePackage": "Resurspaket",
-    "PackageBundle": "Paketpaket",
-    "OptionalPackage": "Valfritt paket"
+    "PackageBundle": "Paketsamling",
+    "OptionalPackage": "Valfritt paket",
+    "AppSettings": "Appinställningar"
   }
 }

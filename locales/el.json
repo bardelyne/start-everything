@@ -145,6 +145,7 @@
     "FrameworkPackage": "Πακέτο πλαισίου",
     "ResourcePackage": "Πακέτο πόρων",
     "PackageBundle": "Δέσμη πακέτων",
-    "OptionalPackage": "Προαιρετικό πακέτο"
+    "OptionalPackage": "Προαιρετικό πακέτο",
+    "AppSettings": "Ρυθμίσεις εφαρμογής"
   }
 }

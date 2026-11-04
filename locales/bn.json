@@ -145,6 +145,7 @@
     "FrameworkPackage": "ফ্রেমওয়ার্ক প্যাকেজ",
     "ResourcePackage": "রিসোর্স প্যাকেজ",
     "PackageBundle": "প্যাকেজ বান্ডল",
-    "OptionalPackage": "ঐচ্ছিক প্যাকেজ"
+    "OptionalPackage": "ঐচ্ছিক প্যাকেজ",
+    "AppSettings": "অ্যাপের সেটিংস"
   }
 }

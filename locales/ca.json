@@ -145,6 +145,7 @@
     "FrameworkPackage": "Paquet de marc de treball",
     "ResourcePackage": "Paquet de recursos",
     "PackageBundle": "Conjunt de paquets",
-    "OptionalPackage": "Paquet opcional"
+    "OptionalPackage": "Paquet opcional",
+    "AppSettings": "Configuració de l’aplicació"
   }
 }

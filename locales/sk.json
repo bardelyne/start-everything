@@ -145,6 +145,7 @@
     "FrameworkPackage": "Balík frameworku",
     "ResourcePackage": "Balík prostriedkov",
     "PackageBundle": "Súprava balíkov",
-    "OptionalPackage": "Voliteľný balík"
+    "OptionalPackage": "Voliteľný balík",
+    "AppSettings": "Nastavenia aplikácie"
   }
 }

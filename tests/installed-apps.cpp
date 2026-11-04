@@ -70,6 +70,28 @@ std::wstring VisualName(const std::string& xml){
     auto name=installed::VisualName(stream,L"Test.Package",L"Test.Package_1.0.0.0_x64__1234567890123");stream->Release();return name;
 }
 int main(){
+    // The process starts in the C locale; search folding must still be Unicode.
+    {
+        std::vector<apps::App> entries;
+        entries.push_back(Launchable(L"Телемост",L"C:\\Apps\\Телемост.exe"));
+        entries.push_back(Launchable(L"Ёлка",L"C:\\Apps\\Ёлка.exe"));
+        entries.push_back(Launchable(L"Éditeur",L"C:\\Apps\\editor.exe"));
+        entries[0].aliases.push_back(apps::ToLower(L"ВИДЕОСВЯЗЬ"));
+        Check(apps::ToLower(L"ТЕЛЕМОСТ")==L"телемост","invariant case folding works for uppercase Cyrillic in the C locale");
+        Check(apps::MatchCatalog(entries,L"телемост",20,nullptr,apps::SearchScope::Normal).size()==1,
+              "lowercase Cyrillic finds an app with an uppercase initial");
+        Check(apps::MatchCatalog(entries,L"ТеЛеМоСт",20,nullptr,apps::SearchScope::Normal).size()==1,
+              "mixed-case Cyrillic matches the same app");
+        Check(apps::MatchCatalog(entries,L"видеосвязь",20,nullptr,apps::SearchScope::Normal).size()==1,
+              "Cyrillic aliases use the same invariant folding");
+        Check(apps::ToLower(L"ЁЖ")==L"ёж" && apps::ToLower(L"Ё")!=apps::ToLower(L"Е"),
+              "Cyrillic yo maps its case while preserving the distinct letter");
+        Check(apps::MatchCatalog(entries,L"ёлка",20,nullptr,apps::SearchScope::Normal).size()==1,
+              "Cyrillic yo finds names beginning with capital yo");
+        Check(apps::MatchCatalog(entries,L"éditeur",20,nullptr,apps::SearchScope::Normal).size()==1,
+              "accented Latin matches without depending on the process locale");
+        Check(apps::ToLower(L"Az 09_-")==L"az 09_-","ASCII case folding preserves punctuation and digits");
+    }
     // Package-icon decoding must remain safe when its caller is an STA.
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     Check(!apps::LocalTargetExists(L"\\\\offline.invalid\\share\\app.exe") &&

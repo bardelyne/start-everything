@@ -69,7 +69,79 @@ void TestLocalizationAndSymbols() {
     Check(i18n::Text(i18n::Key::Apps)[0], "automatic Windows language selection succeeds");
 }
 
-int main(){SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);setvbuf(stdout,nullptr,_IONBF,0);double result=0;TestLocalizationAndSymbols();
+void TestIntegerConversions() {
+    for (auto input : {L"1234",L"+1234",L"0001234",L"0x4D2",L"0X4d2",L"0b10011010010",L"0o2322",
+                       L"1234 hex",L"1234 to binary",L"1234 in oct",L"1234.0 hex",L"12.34e2 hex"}) {
+        const auto rows=calc::Rows(input);
+        Check(rows.size()==1&&rows[0].title.starts_with(L"1234 = ")&&rows[0].copyText==L"0x4D2",
+              "decimal, prefixed bases and explicit conversions share one exact result");
+        Check(rows[0].title.find(L"0b100 1101 0010")!=std::wstring::npos&&rows[0].title.find(L"0o2322")!=std::wstring::npos,
+              "the compact conversion card contains grouped binary and octal values");
+    }
+    for (auto input : {L"0",L"+0",L"-0",L"0x0",L"0b0",L"0o0",L"0e99999999999999999999999"}) {
+        const auto rows=calc::Rows(input);
+        Check(rows.size()==1&&rows[0].copyText==L"0x0"&&rows[0].title.starts_with(L"0 = "),
+              "zero normalizes consistently in every base, including a signed zero");
+    }
+    for (auto input : {L"-1234",L"\u22121234",L"-0x4D2",L"-0b10011010010",L"-0o2322",L"-1234 hex"}) {
+        const auto rows=calc::Rows(input);
+        Check(rows.size()==1&&rows[0].copyText==L"-0x4D2"&&rows[0].title.starts_with(L"-1234 = ")&&
+              rows[0].title.find(L"-0b100 1101 0010")!=std::wstring::npos&&rows[0].title.find(L"-0o2322")!=std::wstring::npos,
+              "negative conversions retain their sign instead of inventing a two's-complement width");
+    }
+    for (auto [input,decimal,hex] : std::vector<std::tuple<std::wstring,std::wstring,std::wstring>>{
+        {L"9007199254740993",L"9007199254740993",L"0x20000000000001"},
+        {L"0x20000000000001",L"9007199254740993",L"0x20000000000001"},
+        {L"9007199254740993.0 hex",L"9007199254740993",L"0x20000000000001"},
+        {L"18446744073709551615",L"18446744073709551615",L"0xFFFFFFFFFFFFFFFF"},
+        {L"18446744073709551615 hex",L"18446744073709551615",L"0xFFFFFFFFFFFFFFFF"},
+        {L"1844674407370955161.5e1 hex",L"18446744073709551615",L"0xFFFFFFFFFFFFFFFF"},
+        {L"0xFFFFFFFFFFFFFFFF",L"18446744073709551615",L"0xFFFFFFFFFFFFFFFF"},
+        {L"-9223372036854775808",L"-9223372036854775808",L"-0x8000000000000000"},
+        {L"-18446744073709551615",L"-18446744073709551615",L"-0xFFFFFFFFFFFFFFFF"}}) {
+        const auto rows=calc::Rows(input);
+        Check(rows.size()==1&&rows[0].copyText==hex&&rows[0].title.starts_with(decimal+L" = "),
+              "64-bit boundaries and values beyond double precision remain exact");
+    }
+    for (auto input : {L"18446744073709551616",L"-18446744073709551616",L"18446744073709551616 hex",
+                       L"0x10000000000000000",L"-0x10000000000000000",L"1e20",L"1e99999999999999999999",
+                       L"0x",L"0b102",L"0o8",L"0xGG",L"1234.txt",L"1234 report",L"01.02.2024",
+                       L"1.5",L"-1.5",L"0.99999999999999999999 hex"})
+        Check(calc::Rows(input).empty(),"overflow, fractional values, malformed literals and filenames do not yield misleading conversions");
+    Check(calc::Rows(L"0b1"+std::wstring(64,L'0')).empty()&&calc::Rows(L"0o2"+std::wstring(21,L'0')).empty(),
+          "binary and octal overflow cannot wrap to zero");
+    std::mt19937_64 random(0x6808);
+    for (int i=0;i<256;++i) {
+        const uint64_t magnitude=random();
+        for (bool negative : {false,true}) {
+            const std::wstring sign=negative&&magnitude?L"-":L"";
+            const auto decimal=sign+std::to_wstring(magnitude);
+            const auto rows=calc::Rows(decimal);
+            Check(rows.size()==1&&rows[0].title.starts_with(decimal+L" = "),"random full-width integers keep their exact decimal value");
+            const auto copied=rows.empty()?std::wstring{}:rows[0].copyText;
+            const auto roundtrip=calc::Rows(copied);
+            Check(roundtrip.size()==1&&roundtrip[0].title==rows[0].title&&roundtrip[0].copyText==copied,
+                  "copied hexadecimal values round-trip exactly for positive and negative 64-bit integers");
+            wchar_t* end=nullptr;
+            const auto parsed=wcstoull(copied.c_str()+(negative?3:2),&end,16);
+            Check(end&&!*end&&parsed==magnitude,"the system integer parser independently confirms the copied magnitude");
+            for (auto [prefix,base,label] : {std::tuple{L"0b",2,L" (Bin)"},std::tuple{L"0o",8,L" (Oct)"}}) {
+                const auto first=rows[0].title.find(prefix);
+                const auto last=rows[0].title.find(label,first);
+                Check(first!=std::wstring::npos&&last!=std::wstring::npos,"every conversion card contains both other bases");
+                auto digits=rows[0].title.substr(first+2,last-first-2);
+                digits.erase(std::remove(digits.begin(),digits.end(),L' '),digits.end());
+                end=nullptr;
+                Check(wcstoull(digits.c_str(),&end,base)==magnitude&&end&&!*end,
+                      "the system integer parser independently confirms binary and octal output");
+                const auto based=calc::Rows(sign+prefix+digits);
+                Check(based.size()==1&&based[0].title==rows[0].title,"binary and octal input round-trip exactly across the full 64-bit range");
+            }
+        }
+    }
+}
+
+int main(){SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);setvbuf(stdout,nullptr,_IONBF,0);double result=0;TestLocalizationAndSymbols();TestIntegerConversions();
 for(auto [expression,expected]:std::vector<std::pair<std::wstring,double>>{{L"2+2",4},{L"2^3^2",512},{L"50% of 200",100},{L"sqrt(9)+abs(-2)",5},{L"0xFF+1",256},{L"(1+2)*3",9},{L"10% of 50% of 200",10}})Check(tools::EvaluateMath(expression,result)&&Near(result,expected),"normal calculation preserves its result");
 for(auto expression:{L"1/0",L"sqrt(-1)",L"log(0)",L"2^^2",L"unknown(3)",L"sin()",L"100% of 1e9999"}){bool accepted=tools::EvaluateMath(expression,result);if(accepted)printf("ACCEPTED invalid=%ls value=%g\n",expression,result);Check(!accepted,"invalid or nonfinite calculation rejected");}
 for(unsigned count:{64u,1000u,10000u}){Check(!tools::EvaluateMath(std::wstring(count,L'(')+L"1"+std::wstring(count,L')'),result),"deep parentheses rejected without a crash");Check(tools::EvaluateMath(L"2+2",result)&&result==4,"depth resets after rejected input");}
@@ -77,7 +149,7 @@ Check(tools::EvaluateMath(std::wstring(20,L'(')+L"1"+std::wstring(20,L')'),resul
 for(auto mode:{0,1,2}){std::wstring expr;if(mode==0)expr=std::wstring(20000,L'-')+L"1";if(mode==1){for(int i=0;i<10000;i++)expr+=L"1^";expr+=L"1";}if(mode==2){for(int i=0;i<1000;i++)expr+=L"1% of ";expr+=L"1";}Check(!tools::EvaluateMath(expr,result),"very long recursive syntax rejected");}
 std::wstring flat=L"1";for(int i=1;i<1000;i++)flat+=L"+1";Check(tools::EvaluateMath(flat,result)&&result==1000,"long flat sums remain valid");
 std::wstring nestedPct;for(int i=0;i<80;i++)nestedPct+=L"1% of ";nestedPct+=L"1";Check(!tools::EvaluateMath(nestedPct,result),"percentage recursion bounded below the text length limit");Check(tools::EvaluateMath(L"3*7",result)&&result==21,"percentage depth unwinds correctly");
-for(auto name:{L"2024 report",L"3d",L"4k",L"5g",L"2024-01-01",L"1920x1080",L"1000",L"?test",L"/ip"})Check(calc::Rows(name).empty(),"ordinary names and other providers stay out of calculator");
+for(auto name:{L"2024 report",L"3d",L"4k",L"5g",L"2024-01-01",L"1920x1080",L"01.02.2024",L"1234.txt",L"?test",L"/ip"})Check(calc::Rows(name).empty(),"ordinary names and other providers stay out of calculator");
 auto mathRows=calc::Rows(L"2+2");Check(!mathRows.empty()&&mathRows.front().copyText==L"4","calculator row copies its numeric result");
 auto units=calc::Rows(L"100 km to mi");Check(units.size()==1&&calc::ParseNumber(units[0].copyText,&result)&&Near(result,62.1371192),"explicit length conversion");
 auto temp=calc::Rows(L"0 C to F");Check(temp.size()==1&&calc::ParseNumber(temp[0].copyText,&result)&&Near(result,32),"temperature offsets preserved");

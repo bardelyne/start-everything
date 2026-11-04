@@ -145,6 +145,7 @@
     "FrameworkPackage": "Pakiet platformy",
     "ResourcePackage": "Pakiet zasobów",
     "PackageBundle": "Zestaw pakietów",
-    "OptionalPackage": "Pakiet opcjonalny"
+    "OptionalPackage": "Pakiet opcjonalny",
+    "AppSettings": "Ustawienia aplikacji"
   }
 }

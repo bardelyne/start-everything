@@ -145,6 +145,7 @@
     "FrameworkPackage": "Пакет на рамкова среда",
     "ResourcePackage": "Пакет с ресурси",
     "PackageBundle": "Комплект пакети",
-    "OptionalPackage": "Допълнителен пакет"
+    "OptionalPackage": "Допълнителен пакет",
+    "AppSettings": "Настройки на приложението"
   }
 }

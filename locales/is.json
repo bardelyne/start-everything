@@ -145,6 +145,7 @@
     "FrameworkPackage": "Rammapakki",
     "ResourcePackage": "Tilfangapakki",
     "PackageBundle": "Pakkasafn",
-    "OptionalPackage": "Valfrjáls pakki"
+    "OptionalPackage": "Valfrjáls pakki",
+    "AppSettings": "Stillingar forrits"
   }
 }

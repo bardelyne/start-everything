@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -33,7 +34,7 @@ std::optional<std::vector<wuxc::Button>> g_appButtonsOpt{std::in_place};
 wuxc::StackPanel g_appsList{nullptr};
 winrt::weak_ref<wuxc::Button> g_paintedSelectedButton;
 std::mutex g_settingsMutex;
-struct {int maxAppResults=20;} g_settings;
+std::atomic<size_t> g_initialAppResults{20};
 std::atomic<uint64_t> g_settingsRevision{1};
 bool g_contextMenuOpen=false;
 int dismissals=0,inputAttachments=0,menuAttachments=0;
@@ -116,10 +117,10 @@ int main(){
             Check(!RenderPlainApps(rich,false),"rich utility cards use their separate layout");
             DetachPlainAppPool();Check(!g_plainPoolAttached && !g_appsList.Children().Size() && g_activeAppsOpt->empty(),"leaving ordinary results detaches the pool and clears selection targets");
             RenderPlainApps(small,false);Check((*g_appButtonsOpt)[0]==buttons[0],"returning from a rich card reuses the original ordinary slots");
-            Check(!RenderPlainApps({},false) && !RenderPlainApps(Rows(21),false),"empty and oversized results use the existing fallback renderer");
-            g_settings.maxAppResults=4;++g_settingsRevision;
+            Check(!RenderPlainApps({},false) && RenderPlainApps(Rows(21),false),"empty results keep their fallback while requested extra app rows use the pool");
+            g_initialAppResults=4;
             RenderPlainApps(Rows(4),true);
-            Check(g_plainAppPool->size()==4 && g_appsList.Children().Size()==4 && (*g_appButtonsOpt)[0]!=buttons[0],"settings changes rebuild a pool bounded by the new limit");
+            Check(g_plainAppPool->size()==4 && g_appsList.Children().Size()==4 && (*g_appButtonsOpt)[0]!=buttons[0],"a smaller viewport trims the old pool without changing settings");
             auto inventory=Rows(20,200);
             auto prepareInventory=[](std::vector<Row>& rows){for(auto& row:rows){row.installedOnly=true;
                 row.sectionTitle=L"Installed apps";row.installedTotal=500;row.openPath=L"ms-settings:appsfeatures";
@@ -135,6 +136,47 @@ int main(){
             const int attachments=inputAttachments;
             Check(RenderPlainApps(inventory,false) && inputAttachments==attachments,
                   "repainting a long inventory adds no controls or input handlers");
+            auto ordinary=Rows(6,300);RenderPlainApps(ordinary,false);
+            std::vector<wuxc::Button> ordinaryFirst=*g_appButtonsOpt;
+            for(unsigned count:{46,86,126}){
+                ordinary=Rows(count,300);
+                Check(RenderPlainApps(ordinary,false)&&g_appButtonsOpt->size()==count,
+                      "ordinary app batches extend past the initial result setting");
+                for(size_t i=0;i<ordinaryFirst.size();++i)Check((*g_appButtonsOpt)[i]==ordinaryFirst[i],
+                      "app pagination preserves each existing native card");
+            }
+            const auto controls=inputAttachments;
+            const auto measured=std::chrono::steady_clock::now();
+            for(unsigned i=0;i<100;++i)RenderPlainApps(ordinary,false);
+            printf("100 x 126-row append-state updates: %.2f ms total (hidden test, excludes presentation)\n",
+                std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-measured).count());
+            Check(inputAttachments==controls,"repainting loaded app batches allocates no more controls");
+        }
+        {
+            // Compare fresh append work, including native XAML measurement.
+            // The window stays hidden; physical frame presentation is excluded.
+            std::vector<double> batch20,batch40;
+            auto layout=[&] {
+                g_appsList.Measure({360,std::numeric_limits<double>::infinity()});
+                g_appsList.Arrange({0,0,360,g_appsList.DesiredSize().Height});
+                g_appsList.UpdateLayout();
+            };
+            for(int sample=0;sample<16;++sample)for(int batch:{20,40}) {
+                DetachPlainAppPool();g_plainAppPool.reset();g_initialAppResults=20;
+                const auto initial=Rows(20,400+sample);RenderPlainApps(initial,false);layout();
+                const auto first=(*g_appButtonsOpt)[0];const auto controls=inputAttachments;
+                const auto next=Rows(20+batch,400+sample);
+                const auto began=std::chrono::steady_clock::now();
+                Check(RenderPlainApps(next,false),"fresh benchmark batch uses the production app-card pool");
+                layout();
+                const auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
+                Check(inputAttachments-controls==batch && (*g_appButtonsOpt)[0]==first,
+                      "fresh appends create only the additional controls and retain the original rows");
+                (batch==20?batch20:batch40).push_back(ms);
+            }
+            std::sort(batch20.begin(),batch20.end());std::sort(batch40.begin(),batch40.end());
+            printf("Fresh app-card append + XAML layout, 16 samples each (hidden, excludes physical presentation): 20 rows median %.2f ms / p95 %.2f ms; 40 rows median %.2f ms / p95 %.2f ms\n",
+                   batch20[8],batch20[15],batch40[8],batch40[15]);
         }
         DetachPlainAppPool();g_plainAppPool.reset();g_activeAppsOpt.reset();g_appButtonsOpt.reset();g_appsList=nullptr;g_paintedSelectedButton={};
         source.Content(nullptr);source.Close();source=nullptr;manager.Close();manager=nullptr;DestroyWindow(hwnd);

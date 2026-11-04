@@ -145,6 +145,7 @@
     "FrameworkPackage": "Paquete de framework",
     "ResourcePackage": "Paquete de recursos",
     "PackageBundle": "Conjunto de paquetes",
-    "OptionalPackage": "Paquete opcional"
+    "OptionalPackage": "Paquete opcional",
+    "AppSettings": "Configuración de la aplicación"
   }
 }

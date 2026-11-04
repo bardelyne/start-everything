@@ -145,6 +145,7 @@
     "FrameworkPackage": "Հենքի փաթեթ",
     "ResourcePackage": "Ռեսուրսների փաթեթ",
     "PackageBundle": "Փաթեթների հավաքածու",
-    "OptionalPackage": "Լրացուցիչ փաթեթ"
+    "OptionalPackage": "Լրացուցիչ փաթեթ",
+    "AppSettings": "Հավելվածի կարգավորումներ"
   }
 }

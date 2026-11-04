@@ -145,6 +145,7 @@
     "FrameworkPackage": "Pachet de framework",
     "ResourcePackage": "Pachet de resurse",
     "PackageBundle": "Colecție de pachete",
-    "OptionalPackage": "Pachet opțional"
+    "OptionalPackage": "Pachet opțional",
+    "AppSettings": "Setări aplicație"
   }
 }

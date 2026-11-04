@@ -145,6 +145,7 @@
     "FrameworkPackage": "Sistemos bibliotekų paketas",
     "ResourcePackage": "Išteklių paketas",
     "PackageBundle": "Paketų rinkinys",
-    "OptionalPackage": "Pasirenkamas paketas"
+    "OptionalPackage": "Pasirenkamas paketas",
+    "AppSettings": "Programėlės parametrai"
   }
 }

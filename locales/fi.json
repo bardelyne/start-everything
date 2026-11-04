@@ -145,6 +145,7 @@
     "FrameworkPackage": "Sovelluskehyspaketti",
     "ResourcePackage": "Resurssipaketti",
     "PackageBundle": "Pakettikokoelma",
-    "OptionalPackage": "Valinnainen paketti"
+    "OptionalPackage": "Valinnainen paketti",
+    "AppSettings": "Sovelluksen asetukset"
   }
 }

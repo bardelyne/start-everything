@@ -145,6 +145,7 @@
     "FrameworkPackage": "Rammeverkspakke",
     "ResourcePackage": "Ressurspakke",
     "PackageBundle": "Pakkesamling",
-    "OptionalPackage": "Valgfri pakke"
+    "OptionalPackage": "Valgfri pakke",
+    "AppSettings": "Appinnstillinger"
   }
 }

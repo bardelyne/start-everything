@@ -145,6 +145,7 @@
     "FrameworkPackage": "Paket ogrodja",
     "ResourcePackage": "Paket virov",
     "PackageBundle": "Zbirka paketov",
-    "OptionalPackage": "Izbirni paket"
+    "OptionalPackage": "Izbirni paket",
+    "AppSettings": "Nastavitve aplikacije"
   }
 }

@@ -145,6 +145,7 @@
     "FrameworkPackage": "Raamwerkpakket",
     "ResourcePackage": "Hulpbronpakket",
     "PackageBundle": "Pakketbundel",
-    "OptionalPackage": "Opsionele pakket"
+    "OptionalPackage": "Opsionele pakket",
+    "AppSettings": "Toepassinginstellings"
   }
 }

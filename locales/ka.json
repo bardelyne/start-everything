@@ -145,6 +145,7 @@
     "FrameworkPackage": "პლატფორმის პაკეტი",
     "ResourcePackage": "რესურსების პაკეტი",
     "PackageBundle": "პაკეტების ნაკრები",
-    "OptionalPackage": "არასავალდებულო პაკეტი"
+    "OptionalPackage": "არასავალდებულო პაკეტი",
+    "AppSettings": "აპის პარამეტრები"
   }
 }

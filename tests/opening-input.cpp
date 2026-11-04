@@ -19,6 +19,8 @@ const HWND host = reinterpret_cast<HWND>(1), start = reinterpret_cast<HWND>(2);
 const HWND searchHost = reinterpret_cast<HWND>(3), other = reinterpret_cast<HWND>(4);
 HWND foreground = start;
 bool nativeFocus = true, visible = false, wakeSucceeds = true, insideHook = false;
+bool startEditing = false;
+constexpr wchar_t kStartTextEditingProperty[] = L"StartEverything_StartTextEditing";
 int checks = 0, failures = 0, pastes = 0, shown = 0, immediate = 0, nativeDelivered = 0;
 std::wstring clipboard = L"clipboard text";
 HKL layout = reinterpret_cast<HKL>(0x409);
@@ -82,6 +84,10 @@ DWORD TestThread(HWND window, DWORD*) { return static_cast<DWORD>(reinterpret_ca
 BOOL TestVisible(HWND) { return visible; }
 BOOL TestPostMessage(HWND, UINT, WPARAM, LPARAM) { return wakeSucceeds; }
 HWND TestSetFocus(HWND window) { return window; }
+HANDLE TestGetProp(HWND window, PCWSTR name) {
+    return window == start && startEditing && wcscmp(name, kStartTextEditingProperty) == 0 ?
+        reinterpret_cast<HANDLE>(1) : nullptr;
+}
 enum class Remap { None, VirtualKey, Unicode, Deferred, Block };
 Remap remap = Remap::None;
 int downstreamCalls = 0;
@@ -94,6 +100,7 @@ LRESULT TestCallNext(HHOOK, int, WPARAM, LPARAM);
 #define PostMessageW TestPostMessage
 #define SetFocus TestSetFocus
 #define CallNextHookEx TestCallNext
+#define GetPropW TestGetProp
 
 HWND CachedStartWindow() { return start; }
 bool IsSearchHostWindow(HWND window) { return window == searchHost; }
@@ -122,6 +129,7 @@ void Reset(HWND window = start) {
     foreground = window;
     visible = window == host;
     nativeFocus = true;
+    startEditing = false;
     remap = Remap::None;
     downstreamCalls = 0;
     deferred.clear();
@@ -172,6 +180,25 @@ bool PasteQueued() {
     return g_searchWindowInputs.size() == 1 && g_searchWindowInputs[0].kind == SearchWindowInput::Paste;
 }
 int main() {
+    Reset(); startEditing = true;
+    for (UINT key : {UINT('A'), UINT('Z'), UINT(VK_SPACE), UINT(VK_BACK), UINT(VK_RETURN), UINT(VK_ESCAPE)})
+        Check(Key(key) == 0 && Key(key, false) == 0 && g_searchWindowInputs.empty(),
+              "Start folder rename retains text, editing keys and their releases");
+    Ctrl(); Check(Key('V') == 0 && g_searchWindowInputs.empty(), "paste stays in Start's native editor");
+    Reset(); startEditing = true; remap = Remap::Unicode;
+    Key('C'); Key('C', false);
+    Check(g_searchWindowInputs.empty() && downstreamCalls == 4, "remapped Unicode stays in Start's native editor");
+    for (const auto language : {0x804, 0x411, 0x412}) {
+        Reset(); startEditing = true; layout = reinterpret_cast<HKL>(language);
+        Check(Key(VK_PROCESSKEY) == 0 && g_searchWindowInputs.empty(), "Start rename retains native IME composition");
+    }
+    Reset(); startEditing = true; Key('A'); Key('A', false); startEditing = false;
+    Key('B'); Key('B', false); ApplySearchWindowInput();
+    Check(g_ourBox.Text() == L"b" && immediate == 1, "leaving Start's editor restores normal type-to-search");
+    Reset(searchHost); startEditing = true; Ctrl();
+    Check(Key('V') == 1 && PasteQueued(), "Start's editing flag does not suppress native SearchHost handoff");
+    Reset(host); startEditing = true; nativeFocus = false; Ctrl();
+    Check(Key('V') == 1 && PasteQueued(), "Start's editing flag does not interfere with our search focus recovery");
     Reset();remap=Remap::VirtualKey;
     Check(Key('C')==1 && Key('C',false)==1,"a physical key consumed by a remapper is not captured again");
     Check(downstreamCalls==4 && g_searchWindowInputs.size()==1 && g_searchWindowInputs[0].text==L"d",

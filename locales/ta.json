@@ -145,6 +145,7 @@
     "FrameworkPackage": "கட்டமைப்புத் தொகுப்பு",
     "ResourcePackage": "வளத் தொகுப்பு",
     "PackageBundle": "தொகுப்புகளின் தொகுதி",
-    "OptionalPackage": "விருப்பத் தொகுப்பு"
+    "OptionalPackage": "விருப்பத் தொகுப்பு",
+    "AppSettings": "பயன்பாட்டு அமைப்புகள்"
   }
 }

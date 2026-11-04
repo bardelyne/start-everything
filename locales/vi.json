@@ -145,6 +145,7 @@
     "FrameworkPackage": "Gói nền tảng",
     "ResourcePackage": "Gói tài nguyên",
     "PackageBundle": "Bộ gói",
-    "OptionalPackage": "Gói tùy chọn"
+    "OptionalPackage": "Gói tùy chọn",
+    "AppSettings": "Cài đặt ứng dụng"
   }
 }

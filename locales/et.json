@@ -145,6 +145,7 @@
     "FrameworkPackage": "Raamistikupakett",
     "ResourcePackage": "Ressursipakett",
     "PackageBundle": "Paketikogum",
-    "OptionalPackage": "Valikuline pakett"
+    "OptionalPackage": "Valikuline pakett",
+    "AppSettings": "Rakenduse sätted"
   }
 }

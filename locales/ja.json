@@ -145,6 +145,7 @@
     "FrameworkPackage": "フレームワークパッケージ",
     "ResourcePackage": "リソースパッケージ",
     "PackageBundle": "パッケージバンドル",
-    "OptionalPackage": "オプションパッケージ"
+    "OptionalPackage": "オプションパッケージ",
+    "AppSettings": "アプリの設定"
   }
 }

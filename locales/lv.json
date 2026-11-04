@@ -145,6 +145,7 @@
     "FrameworkPackage": "Ietvara pakotne",
     "ResourcePackage": "Resursu pakotne",
     "PackageBundle": "Pakotņu kopa",
-    "OptionalPackage": "Neobligāta pakotne"
+    "OptionalPackage": "Neobligāta pakotne",
+    "AppSettings": "Programmas iestatījumi"
   }
 }

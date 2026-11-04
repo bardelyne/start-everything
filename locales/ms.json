@@ -145,6 +145,7 @@
     "FrameworkPackage": "Pakej rangka kerja",
     "ResourcePackage": "Pakej sumber",
     "PackageBundle": "Himpunan pakej",
-    "OptionalPackage": "Pakej pilihan"
+    "OptionalPackage": "Pakej pilihan",
+    "AppSettings": "Tetapan aplikasi"
   }
 }

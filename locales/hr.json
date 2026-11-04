@@ -145,6 +145,7 @@
     "FrameworkPackage": "Paket programskog okvira",
     "ResourcePackage": "Paket resursa",
     "PackageBundle": "Skup paketa",
-    "OptionalPackage": "Neobavezni paket"
+    "OptionalPackage": "Neobavezni paket",
+    "AppSettings": "Postavke aplikacije"
   }
 }

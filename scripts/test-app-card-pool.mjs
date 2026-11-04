@@ -12,7 +12,7 @@ let test=fs.readFileSync(path.join(root,'tests/app-card-pool.cpp'),'utf8')
     .replace('// PRODUCTION_MODEL',part('struct WeatherDayRow {','// Icons take 24 logical pixels'))
     .replace('// PRODUCTION_CARD',part('struct AppCardUI {','[[clang::no_destroy]] static std::optional<std::vector<wuxc::Button>>'))
     .replace('// PRODUCTION_BADGE',part('wuxc::Grid BuildInstalledBadge() {','wuxc::StackPanel BuildWeatherTimeline('))
-    .replace('// PRODUCTION_ICON',part('void ApplyAppIcon(','void AddAppUninstallItem('))
+    .replace('// PRODUCTION_ICON',part('void ApplyAppIcon(','// The shell supplies labels/state.'))
     .replace('// PRODUCTION_POOL',part('// Ordinary app/Settings rows have one stable visual tree per slot.','// Runs on the XAML thread. The high-priority apps pass never builds file rows.'));
 const cpp=path.join(output,'app-card-pool.cpp'),exe=path.join(output,'app-card-pool.exe');
 fs.writeFileSync(cpp,test);

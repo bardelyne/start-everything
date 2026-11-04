@@ -145,6 +145,7 @@
     "FrameworkPackage": "แพ็กเกจเฟรมเวิร์ก",
     "ResourcePackage": "แพ็กเกจทรัพยากร",
     "PackageBundle": "ชุดแพ็กเกจ",
-    "OptionalPackage": "แพ็กเกจเสริม"
+    "OptionalPackage": "แพ็กเกจเสริม",
+    "AppSettings": "การตั้งค่าแอป"
   }
 }

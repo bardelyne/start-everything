@@ -145,6 +145,7 @@
     "FrameworkPackage": "框架程序包",
     "ResourcePackage": "资源程序包",
     "PackageBundle": "程序包捆绑包",
-    "OptionalPackage": "可选程序包"
+    "OptionalPackage": "可选程序包",
+    "AppSettings": "应用设置"
   }
 }

@@ -145,6 +145,7 @@
     "FrameworkPackage": "Paketë platforme",
     "ResourcePackage": "Paketë burimesh",
     "PackageBundle": "Grup paketash",
-    "OptionalPackage": "Paketë opsionale"
+    "OptionalPackage": "Paketë opsionale",
+    "AppSettings": "Cilësimet e aplikacionit"
   }
 }

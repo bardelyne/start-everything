@@ -145,6 +145,7 @@
     "FrameworkPackage": "फ़्रेमवर्क पैकेज",
     "ResourcePackage": "संसाधन पैकेज",
     "PackageBundle": "पैकेज बंडल",
-    "OptionalPackage": "वैकल्पिक पैकेज"
+    "OptionalPackage": "वैकल्पिक पैकेज",
+    "AppSettings": "ऐप सेटिंग्स"
   }
 }

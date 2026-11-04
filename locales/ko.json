@@ -145,6 +145,7 @@
     "FrameworkPackage": "프레임워크 패키지",
     "ResourcePackage": "리소스 패키지",
     "PackageBundle": "패키지 번들",
-    "OptionalPackage": "선택적 패키지"
+    "OptionalPackage": "선택적 패키지",
+    "AppSettings": "앱 설정"
   }
 }

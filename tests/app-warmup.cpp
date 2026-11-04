@@ -21,6 +21,7 @@ std::mutex gate;
 std::condition_variable gateWake;
 bool blocked=false,entered=false,fail=false,throws=false;
 std::atomic<int> rebuilds{0};
+std::atomic<bool> warmIcons{false};
 struct App {std::wstring name=L"test";bool isSetting=false,installedOnly=false;void* pidl=nullptr;};
 const std::wstring& IconIdentity(const App& app){return app.name;}
 struct Index {
@@ -33,7 +34,10 @@ struct Index {
         if(throws)throw 1;return !fail;
     }
     size_t Count()const{return 42;}
-    const App* At(size_t)const{return nullptr;}
+    const App* At(size_t i)const{
+        static const App icons[]={{L"warm-a"},{L"warm-b"},{L"warm-c"}};
+        return warmIcons&&i<std::size(icons)?&icons[i]:nullptr;
+    }
     std::shared_ptr<Index> Refreshed(bool, const std::atomic<bool>* cancel = nullptr)const{auto next=std::make_shared<Index>();return next->Rebuild(cancel)?next:nullptr;}
 };
 // PRODUCTION_WARMUP
@@ -41,7 +45,7 @@ struct Index {
 int checks=0;
 void Check(bool ok,const char* what){if(!ok){printf("FAIL: %s\n",what);std::exit(1);}++checks;}
 void Entered(){std::unique_lock lock(apps::gate);Check(apps::gateWake.wait_for(lock,2s,[]{return apps::entered;}),"background build reaches its controlled provider");}
-void Reset(bool blocked=false,bool fail=false,bool throws=false){std::lock_guard lock(apps::gate);apps::blocked=blocked;apps::fail=fail;apps::throws=throws;apps::entered=false;apps::rebuilds=0;}
+void Reset(bool blocked=false,bool fail=false,bool throws=false){std::lock_guard lock(apps::gate);apps::blocked=blocked;apps::fail=fail;apps::throws=throws;apps::entered=false;apps::rebuilds=0;apps::warmIcons=false;}
 void Release(){std::lock_guard lock(apps::gate);apps::blocked=false;apps::gateWake.notify_all();}
 
 std::atomic<bool> g_quit{false};
@@ -102,6 +106,29 @@ int main(){
     Check(replacement.index && replacement.index!=previous.index && replacement.version>version,"a catalog change publishes a complete replacement even before any search UI exists");
     Check(previous.index->Count()==42,"an old snapshot stays alive for outstanding readers");
     warm.Stop();
+    {
+        Reset();apps::warmIcons=true;
+        std::atomic<unsigned> warmed{0};
+        apps::WarmIndex::Handlers preload;
+        preload.appIcon=[&](const apps::App*,int pixels){
+            Check(pixels==48,"headless icon warming uses the requested display size");
+            ++warmed;return std::vector<BYTE>(4,255);
+        };
+        Check(warm.Start(std::move(preload),48),"headless icon fixture starts without a search worker");
+        const auto owner=warm.Take().index;
+        const auto until=GetTickCount64()+2000;
+        while(warmed<3&&GetTickCount64()<until)Sleep(1);
+        for(unsigned i=0;i<3;++i){
+            const auto key=apps::WarmIndex::AppKey(*owner->At(i),48);
+            const auto deadline=GetTickCount64()+1000;
+            while(!warm.Cached(key)&&GetTickCount64()<deadline)Sleep(1);
+            Check(warm.Cached(key).has_value(),"every app icon is cached before opening any UI or calling Prefetch");
+        }
+        Check(warmed==3&&!uiCreates&&!shows,"headless prefetch runs once per icon and creates no search window");
+        warm.Prefetch(owner,48);Sleep(10);
+        Check(warmed==3,"opening search reuses the completed background icon cache");
+        warm.Stop();
+    }
     Reset(false,true);Check(warm.Start(),"failed-provider warmup starts");
     Check(!warm.Take().index,"provider failure leaves the normal first-search rebuild available");warm.Stop();
     Reset(false,false,true);Check(warm.Start(),"throwing-provider warmup starts");

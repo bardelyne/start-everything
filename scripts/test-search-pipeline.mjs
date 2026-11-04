@@ -21,6 +21,7 @@ const fragments = {
     PENDING: between('bool ResultsPending() {', '// What Enter does:'),
     RENDER_SNAPSHOT: between('struct SearchRenderSnapshot {', '// Replace a fallback icon'),
     QUEUE: between('void QueueQuery(std::wstring text) {', '// An app\'s icon, from its shell identity.'),
+    FILE_PAGES: between('// <file-result-pages>', '// </file-result-pages>'),
     WORKERS: between('void FileSearchThreadMain() {', 'void TeardownSearchUi() {'),
 };
 let test = fs.readFileSync(path.join(root, 'tests/search-pipeline.cpp'), 'utf8');

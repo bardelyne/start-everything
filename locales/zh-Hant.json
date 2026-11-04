@@ -145,6 +145,7 @@
     "FrameworkPackage": "架構套件",
     "ResourcePackage": "資源套件",
     "PackageBundle": "套件組合",
-    "OptionalPackage": "選用套件"
+    "OptionalPackage": "選用套件",
+    "AppSettings": "應用程式設定"
   }
 }

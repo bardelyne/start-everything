@@ -10,6 +10,9 @@ function part(a,b){const i=source.indexOf(a),j=source.indexOf(b,i+a.length);if(i
 const code=fs.readFileSync(path.join(root,'tests/installed-scroll.cpp'),'utf8')
  .replace('// PRODUCTION_MODEL',part('struct WeatherDayRow {','// Icons take 24 logical pixels'))
  .replace('// PRODUCTION_BATCH',part('inline constexpr size_t kInstalledBatchSize=','std::vector<Row> g_fileRows;'))
+ .replace('// PRODUCTION_RESULT_BATCH',part('struct FileSearchRequest {','// Publish only the current request.'))
+ .replace('// PRODUCTION_FILE_CARDS',part('// <file-cards>','// </file-cards>'))
+ .replace('// PRODUCTION_INITIAL_VIEWPORT',part('// Only the UI reads XAML geometry.','// UI-thread scroll notification;'))
  .replace('// PRODUCTION_SCROLL',part('// UI-thread scroll notification;','// The XAML thread keeps the displayed files'));
 const cpp=path.join(output,'installed-scroll.cpp'),exe=path.join(output,'installed-scroll.exe');fs.writeFileSync(cpp,code);
 const compiler=process.env.CXX||'C:/Program Files/Windhawk/Compiler/bin/clang++.exe';

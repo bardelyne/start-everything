@@ -145,6 +145,7 @@
     "FrameworkPackage": "Kifurushi cha mfumo",
     "ResourcePackage": "Kifurushi cha rasilimali",
     "PackageBundle": "Kundi la vifurushi",
-    "OptionalPackage": "Kifurushi cha hiari"
+    "OptionalPackage": "Kifurushi cha hiari",
+    "AppSettings": "Mipangilio ya programu"
   }
 }

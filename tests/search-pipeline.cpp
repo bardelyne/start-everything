@@ -13,6 +13,7 @@
 #include <cwctype>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -23,7 +24,7 @@
 #include <vector>
 using namespace std::chrono_literals;
 // PRODUCTION_COMMANDS
-struct CustomCommand { std::wstring name, command; };
+struct CustomCommand { std::wstring name, command, icon; };
 enum class CustomCommandShell { Cmd };
 std::mutex g_resultsMutex, g_queryMutex, g_settingsMutex;
 std::condition_variable g_queryWake, g_fileQueryWake;
@@ -34,7 +35,7 @@ std::atomic<uint64_t> g_settingsRevision{1};
 std::atomic<DWORD> g_totalMatches{0};
 struct {
     bool learnFavorites = true, filterNoisyPaths = true;
-    int searchDebounceMs = 0, maxFileResults = 12, maxAppResults = 6;
+    int searchDebounceMs = 0;
     std::vector<std::wstring> excludedPaths;
     std::vector<CustomCommand> customCommands;
     bool onlineCards = true;
@@ -59,6 +60,9 @@ bool fileEntered = false, releaseFiles = false;
 bool blockIcons=true,iconEntered=false,blockRebuild=false,rebuildEntered=false;
 std::atomic<bool> includeGamma{false};
 std::vector<std::wstring> fileQueries;
+std::vector<DWORD> pageSorts;
+std::atomic<DWORD> selectedFileSort{20};
+std::atomic<unsigned> sortReads{0};
 void RequestRender() {
     std::scoped_lock lock(observedMutex, g_resultsMutex);
     seenApps.push_back({g_appsRevision, g_appRows});
@@ -116,6 +120,10 @@ public:
             app.installedName=app.name;app.installedId=app.name;app.installedOnly=true;app.inventoryOnly=true;
             app.targetPath=L"ms-settings:appsfeatures";app.installedPackage=app.name+L"_1.0.0.0_x64__1234567890123";
             apps.push_back(std::move(app));
+        }
+        for(int i=0;i<75;++i) {
+            App app;app.name=L"Paged "+std::to_wstring(i);app.nameLower=tools::ToLower(app.name);
+            app.targetPath=app.name+L".exe";apps.push_back(std::move(app));
         }
         if(includeGamma){App added;added.name=L"Gamma";added.nameLower=L"gamma";added.targetPath=L"Gamma.exe";apps.push_back(std::move(added));}
         return true;
@@ -199,26 +207,36 @@ std::wstring Format(Key, std::initializer_list<std::wstring>) { return L"test"; 
 struct ResolvedWebQuery { std::wstring queryTerm, serviceName, homeUrl, searchUrl; bool isShortcut = false; };
 ResolvedWebQuery ResolveWebSearch(std::wstring text) { ResolvedWebQuery r; r.queryTerm = std::move(text); return r; }
 namespace everything {
+inline constexpr DWORD kSortNameAscending=1;
 struct Result { std::wstring name, path; bool isFolder = false; };
 class Client {
 public:
     bool Init() { return true; }
+    DWORD PreferredSort() const {++sortReads;return selectedFileSort;}
+    bool QueryPage(const std::wstring& query,DWORD limit,DWORD offset,std::vector<Result>* rows,DWORD* total,DWORD sort=kSortNameAscending) {
+        if(query!=L"Paged")return Query(query,limit,rows,total);
+        std::lock_guard lock(providerMutex);fileQueries.push_back(query);pageSorts.push_back(sort);*total=175;
+        for(DWORD i=offset;i<std::min(offset+limit,*total);++i)
+            rows->push_back({L"Paged "+std::to_wstring(i),L"test",false});
+        return true;
+    }
     bool Query(const std::wstring& query, DWORD, std::vector<Result>* rows, DWORD* total) {
         std::unique_lock lock(providerMutex);
         fileQueries.push_back(query);
         fileEntered = true;
         providerWake.notify_all();
         providerWake.wait(lock, [] { return releaseFiles; });
-        rows->push_back({query, L"test", false}); *total = 1;
+        rows->push_back({query.empty()?L"Recent file":query, L"test", false}); *total = 1;
         return true;
     }
 };
 }
-namespace ranker {
+namespace filefilter {
 constexpr DWORD kDefaultPool = 100;
-size_t Rank(std::vector<everything::Result>* rows, const std::wstring&, size_t, const std::vector<std::wstring>*) { return rows->size(); }
+size_t Filter(std::vector<everything::Result>* rows, const std::wstring&, size_t, const std::vector<std::wstring>*) { return rows->size(); }
 std::wstring WithExclusions(const std::wstring& q, const std::vector<std::wstring>*) { return q; }
 }
+// PRODUCTION_FILE_PAGES
 namespace icons {
 class FileIconCache {
 public:
@@ -234,7 +252,9 @@ public:
 std::wstring g_shownQuery;
 uint64_t g_shownAppsRevision = 0, g_shownFilesRevision = 0;
 uint64_t g_shownAppsContentRevision = 0;
+uint64_t g_shownFilesContentRevision = 0;
 DWORD g_shownFilesTotal = 0;
+bool g_shownFilesTotalExact = true;
 std::vector<Row> g_currentAppRows;
 std::vector<Row> g_currentFileRows;
 bool g_filesColumnActive = false;
@@ -243,6 +263,7 @@ std::atomic<bool> filesVisible{true};
 bool FilesPanelVisible() { return filesVisible.load(); }
 // PRODUCTION_PENDING
 // PRODUCTION_RENDER_SNAPSHOT
+void UpdateInitialResultCounts() {} // Worker-only fixture has no XAML viewport.
 // PRODUCTION_QUEUE
 // PRODUCTION_WORKERS
 
@@ -304,20 +325,23 @@ int main() {
     // Pending files must never turn an apps update into an empty files pass.
     const auto old = Queue(L"Alpha");
     Row oldFile; oldFile.title = L"old file"; oldFile.openPath = L"old.txt";
-    Check(PublishAppResults(old, L"Alpha", {}) && PublishFileResults(old, {oldFile}, 45), "seed displayed file results");
+    Check(PublishAppResults(old, L"Alpha", {}) && PublishFileResults(old, {oldFile}, 45,true,false), "seed displayed file results");
     g_currentFileRows = {oldFile};
     g_shownAppsRevision = g_shownFilesRevision = old;
     g_shownAppsContentRevision = g_appsContentRevision;
     g_shownFilesTotal = 45;
+    g_shownFilesTotalExact = false;
     const auto next = Queue(L"Beta");
     Row newApp; newApp.title = L"Beta";
     Check(PublishAppResults(next, L"Beta", {newApp}), "new apps publish ahead of replacement files");
     const auto appPass = ReadSearchRenderSnapshot(true, false);
     Check(appPass && appPass->appsChanged && !appPass->filesChanged, "apps pass does not invalidate displayed files");
     Check(appPass->fileCount == 1 && appPass->total == 45, "pending file badge keeps its displayed count");
+    Check(!appPass->totalExact,"apps-only updates preserve the displayed estimate marker while files are pending");
     Check(appPass->files.empty() && g_currentFileRows[0].openPath == L"old.txt", "apps pass neither copies file icons nor clears visible rows");
     const auto pending = ReadSearchRenderSnapshot(false, false);
     Check(pending && !pending->filesChanged && pending->filesRevision == old, "normal pass also retains old files while waiting");
+    Check(!pending->totalExact,"a new query cannot mislabel retained old estimates as exact");
     const auto restyle = ReadSearchRenderSnapshot(false, true);
     Check(restyle && restyle->filesChanged && restyle->files[0].openPath == L"old.txt", "theme refresh restyles retained files without blanking them");
     g_shownAppsRevision = next;
@@ -334,6 +358,7 @@ int main() {
     Check(replacement && replacement->filesChanged && !replacement->appsChanged && replacement->files[0].openPath == L"new.txt",
           "ready files replace old rows in a single file-only pass");
     Check(replacement->total == 82 && replacement->filesRevision == next, "replacement count and revision belong to new files");
+    Check(replacement->totalExact,"a completed replacement publishes an exact counter");
     Check(PublishFileResults(next, {}, 0), "genuine empty file results publish");
     const auto noFiles = ReadSearchRenderSnapshot(false, false);
     Check(noFiles && noFiles->filesChanged && noFiles->files.empty() && noFiles->fileCount == 0,
@@ -417,7 +442,8 @@ int main() {
     Check(Apps(empty) && Files(empty), "empty query updates both panels");
     {
         std::lock_guard lock(observedMutex);
-        Check(seenApps.back().rows.size() == 2 && seenFiles.back().rows.empty(), "empty query has app suggestions without file results");
+        Check(seenApps.back().rows.size() == 2 && seenFiles.back().rows.size()==1 &&
+              seenFiles.back().rows[0].title==L"Recent file", "empty query keeps app suggestions and shows Everything files");
     }
     const auto web = Queue(L"?cats");
     Check(Apps(web) && Files(web), "explicit web mode updates both panels");
@@ -484,18 +510,15 @@ int main() {
     Check(!InstalledNearEnd(0,0,1400) && !InstalledNearEnd(0,600,0) && !InstalledNearEnd(-1,600,1400) &&
           !InstalledNearEnd(std::numeric_limits<double>::infinity(),600,1400),"unmeasured and invalid scroll metrics do not request content");
     Check(!RequestMoreInstalled(L"/all",19,firstBatch),"a partial or stale visible-card count cannot advance the inventory");
-    Check(RequestMoreInstalled(L"/all",20,firstBatch),"the first downward scroll requests another 20 rows");
+    Check(RequestMoreInstalled(L"/all",20,firstBatch),"the first downward scroll requests another 40 rows");
     Check(!RequestMoreInstalled(L"/all",20,firstBatch),"repeated scroll events cannot duplicate an in-flight batch");
     uint64_t secondBatch;{std::lock_guard lock(g_queryMutex);secondBatch=g_queryRevision;}
     Check(Apps(secondBatch) && Files(secondBatch),"the second batch publishes through the existing app worker");
     {std::lock_guard lock(observedMutex);const auto& rows=seenApps.back().rows;
-     Check(rows.size()==40,"the list grows from 20 to 40 without navigation cards");
+     Check(rows.size()==60,"the list grows from 20 to 60 without navigation cards");
      Check(std::equal(initial.begin(),initial.end(),rows.begin(),[](const auto& a,const auto& b){return a.title==b.title && a.cardSignature==b.cardSignature && a.appIndex==b.appIndex && a.iconKey==b.iconKey;}),"already visible card identities stay unchanged when new rows append");
      Check(rows.back().installedProtected && !rows.back().installedPackage.empty(),"new component rows retain protection and exact package identity");}
-    Check(RequestMoreInstalled(L"/all",40,secondBatch),"the next scroll requests rows 41 through 60");
-    uint64_t thirdBatch;{std::lock_guard lock(g_queryMutex);thirdBatch=g_queryRevision;}
-    Check(Apps(thirdBatch) && Files(thirdBatch),"the third batch publishes promptly");
-    Check(RequestMoreInstalled(L"/all",60,thirdBatch),"the last scroll requests the remaining rows");
+    Check(RequestMoreInstalled(L"/all",60,secondBatch),"the last scroll requests the remaining rows");
     uint64_t lastBatch;{std::lock_guard lock(g_queryMutex);lastBatch=g_queryRevision;}
     Check(Apps(lastBatch) && Files(lastBatch),"the last partial batch publishes promptly");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==71 && seenFiles.back().rows.empty(),"all 71 records become visible and no Everything request is made");}
@@ -520,6 +543,48 @@ int main() {
         std::scoped_lock lock(observedMutex, providerMutex);
         Check(seenFiles.back().rows.empty() && fileQueries.back() == L"cats", "hidden files panel performs no file query");
     }
+    filesVisible=true;
+    g_initialAppResults=InitialResultCount(480,48);
+    g_initialFileResults=InitialResultCount(720,48);
+    const auto paged=Queue(L"Paged");
+    Check(Apps(paged)&&Files(paged),"ordinary batched query publishes both initial panels");
+    const auto initialCounter=ReadSearchRenderSnapshot(false,false);
+    Check(initialCounter && !initialCounter->totalExact,"a worker with more pages marks its initial total as approximate");
+    const auto firstSortReads=sortReads.load();
+    selectedFileSort=14;
+    size_t queryCount;
+    {std::lock_guard lock(providerMutex);queryCount=fileQueries.size();}
+    {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==12&&seenFiles.back().rows.size()==17,
+          "ordinary panels use independently calculated viewport sizes");}
+    Check(RequestMoreApps(L"Paged",12,paged),"ordinary apps accept their next batch");
+    {std::unique_lock lock(observedMutex);Check(observedWake.wait_for(lock,2s,[&]{return seenApps.back().rows.size()==52;}),
+          "app worker publishes forty additional matches on the same query");}
+    {std::lock_guard lock(providerMutex);Check(fileQueries.size()==queryCount,"app batch does not requery Everything");}
+    {std::lock_guard lock(g_queryMutex);Check(g_queryRevision==paged,"ordinary app paging keeps the typed revision");}
+    {std::lock_guard lock(g_resultsMutex);g_currentFileRows=g_fileRows;g_shownFilesRevision=g_filesRevision;
+          g_shownFilesContentRevision=g_filesContentRevision;g_shownAppsRevision=g_appsRevision;
+          g_shownAppsContentRevision=g_appsContentRevision;}
+    Check(RequestMoreFiles(L"Paged",17,paged),"ordinary files accept their next batch");
+    {std::unique_lock lock(observedMutex);Check(observedWake.wait_for(lock,2s,[&]{return seenFiles.back().rows.size()==57;}),
+          "file worker publishes forty more rows on the same query");}
+    const auto appended=ReadSearchRenderSnapshot(false,false);
+    Check(appended&&appended->filesChanged&&!appended->appsChanged&&appended->files.size()==57&&!appended->totalExact,
+          "file-only append is renderable without another app publication");
+    {std::lock_guard lock(providerMutex);Check(fileQueries.size()==queryCount,"next file batch reuses its ranked provider page");}
+    {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==52,"file paging leaves the displayed apps intact");}
+    for(size_t count:{57u,97u,137u}) {
+        Check(RequestMoreFiles(L"Paged",count,paged),"later file batches remain available");
+        std::unique_lock lock(observedMutex);
+        Check(observedWake.wait_for(lock,2s,[&]{return seenFiles.back().rows.size()==std::min(count+40,size_t(175));}),
+              "file worker advances beyond its first provider page");
+    }
+    Check(sortReads==firstSortReads,"paging freezes its sort until the next typed query");
+    {std::lock_guard lock(providerMutex);Check(pageSorts.size()==2 && pageSorts[0]==20 && pageSorts[1]==20,
+          "all IPC pages use the original sort even if Everything changes during browsing");}
+    const auto finalCounter=ReadSearchRenderSnapshot(false,false);
+    Check(finalCounter && finalCounter->filesChanged && finalCounter->totalExact &&
+          finalCounter->files.size()==175 && finalCounter->total==175,
+          "the final file batch switches from an estimate to an exact shown/total counter");
     for (int i = 0; i < 200; ++i) Queue(i % 2 ? L"Alpha" : L"Beta");
     const auto rapid = Queue(L"Beta");
     Check(Apps(rapid) && Files(rapid), "rapid typing converges to the latest revision");

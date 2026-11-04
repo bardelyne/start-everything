@@ -145,6 +145,7 @@
     "FrameworkPackage": "Пакет на рамковна околина",
     "ResourcePackage": "Пакет со ресурси",
     "PackageBundle": "Збирка пакети",
-    "OptionalPackage": "Изборен пакет"
+    "OptionalPackage": "Изборен пакет",
+    "AppSettings": "Поставки за апликацијата"
   }
 }

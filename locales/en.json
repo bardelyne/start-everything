@@ -145,6 +145,7 @@
     "FrameworkPackage": "Framework package",
     "ResourcePackage": "Resource package",
     "PackageBundle": "Package bundle",
-    "OptionalPackage": "Optional package"
+    "OptionalPackage": "Optional package",
+    "AppSettings": "App settings"
   }
 }

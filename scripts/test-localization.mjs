@@ -23,6 +23,7 @@ const includes=`#define NOMINMAX
 #include <string>
 #include <string_view>
 #include <initializer_list>
+#include <tuple>
 #include <vector>
 #include <random>
 #include <mutex>

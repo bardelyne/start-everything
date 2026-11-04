@@ -145,6 +145,7 @@
     "FrameworkPackage": "Paket kerangka kerja",
     "ResourcePackage": "Paket sumber daya",
     "PackageBundle": "Bundel paket",
-    "OptionalPackage": "Paket opsional"
+    "OptionalPackage": "Paket opsional",
+    "AppSettings": "Pengaturan aplikasi"
   }
 }
