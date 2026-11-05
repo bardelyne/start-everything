@@ -146,6 +146,7 @@
     "ResourcePackage": "Išteklių paketas",
     "PackageBundle": "Paketų rinkinys",
     "OptionalPackage": "Pasirenkamas paketas",
-    "AppSettings": "Programėlės parametrai"
+    "AppSettings": "Programėlės parametrai",
+    "CheckingPins": "Tikrinamos prisegimo parinktys…"
   }
 }

@@ -146,6 +146,7 @@
     "ResourcePackage": "Ressourcenpaket",
     "PackageBundle": "Paketbündel",
     "OptionalPackage": "Optionales Paket",
-    "AppSettings": "App-Einstellungen"
+    "AppSettings": "App-Einstellungen",
+    "CheckingPins": "Anheftoptionen werden geprüft…"
   }
 }

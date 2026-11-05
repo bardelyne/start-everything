@@ -146,6 +146,7 @@
     "ResourcePackage": "Balík prostriedkov",
     "PackageBundle": "Súprava balíkov",
     "OptionalPackage": "Voliteľný balík",
-    "AppSettings": "Nastavenia aplikácie"
+    "AppSettings": "Nastavenia aplikácie",
+    "CheckingPins": "Zisťovanie možností pripnutia…"
   }
 }

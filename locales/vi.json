@@ -146,6 +146,7 @@
     "ResourcePackage": "Gói tài nguyên",
     "PackageBundle": "Bộ gói",
     "OptionalPackage": "Gói tùy chọn",
-    "AppSettings": "Cài đặt ứng dụng"
+    "AppSettings": "Cài đặt ứng dụng",
+    "CheckingPins": "Đang kiểm tra tùy chọn ghim…"
   }
 }

@@ -146,6 +146,7 @@
     "ResourcePackage": "资源程序包",
     "PackageBundle": "程序包捆绑包",
     "OptionalPackage": "可选程序包",
-    "AppSettings": "应用设置"
+    "AppSettings": "应用设置",
+    "CheckingPins": "正在检查固定选项…"
   }
 }

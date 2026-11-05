@@ -37,7 +37,8 @@
 #include <vector>
 void Wh_Log(const wchar_t*,...){}
 size_t Wh_GetStringValue(const wchar_t*,wchar_t*,size_t){return 0;}
-void Wh_SetStringValue(const wchar_t*,const wchar_t*){}
+BOOL Wh_SetStringValue(const wchar_t*,const wchar_t*){return TRUE;}
+BOOL Wh_DeleteValue(const wchar_t*){return TRUE;}
 namespace settings {
 struct Item {const wchar_t* name;const wchar_t* command;const wchar_t* area;const wchar_t* pageGroup;const wchar_t* altNames;};
 struct DestinationCheck {bool Available(const Item&){return true;}};

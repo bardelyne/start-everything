@@ -146,6 +146,7 @@
     "ResourcePackage": "Pacote de recursos",
     "PackageBundle": "Conjunto de pacotes",
     "OptionalPackage": "Pacote opcional",
-    "AppSettings": "Configurações do aplicativo"
+    "AppSettings": "Configurações do aplicativo",
+    "CheckingPins": "Verificando opções de fixação…"
   }
 }

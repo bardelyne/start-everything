@@ -146,6 +146,7 @@
     "ResourcePackage": "Bronnenpakket",
     "PackageBundle": "Pakketbundel",
     "OptionalPackage": "Optioneel pakket",
-    "AppSettings": "App-instellingen"
+    "AppSettings": "App-instellingen",
+    "CheckingPins": "Vastmaakopties controleren…"
   }
 }

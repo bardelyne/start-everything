@@ -13,10 +13,11 @@ if(process.argv.includes('--full-settings')) {
  if(start<0||end<0)throw Error('Missing Settings fixture boundary');
  fixture=fixture.slice(0,start)+part('namespace settings {','} // namespace settings')+'}\n'+fixture.slice(end);
 }
+const textHelpers=source.slice(source.indexOf('// <search-text>'),source.indexOf('// </search-text>'));
 let code=fixture
  .replace('// PRODUCTION_CATALOG',part('namespace installed {','}  // namespace installed')+'}\n')
  .replace('// PRODUCTION_UNINSTALL',part('namespace uninstall {','}  // namespace uninstall')+'}\n')
- .replace('// PRODUCTION_APPS',part('namespace apps {','}  // namespace apps')+'}\n')
+ .replace('// PRODUCTION_APPS',textHelpers+part('namespace apps {','}  // namespace apps')+'}\n')
  .replace('// PRODUCTION_PACKAGE_ICON',part('namespace icons {','inline bool BitmapToBgra(')+'}\n'+'namespace preview {\n'+part('template <typename F>\ninline void RunInMta(', '// Use Windows\' built-in codecs')+'}\n'+part('bool FetchInstalledPackageIconMta(','bool FetchAppIcon('));
 const cpp=path.join(output,'installed-apps.cpp'),exe=path.join(output,'installed-apps.exe');fs.writeFileSync(cpp,code);
 const options={encoding:'utf8',windowsHide:true,env:{...process.env,TEMP:output,TMP:output},timeout:120000};

@@ -39,7 +39,7 @@ namespace WindhawkUtils { template<class Prototype> bool SetFunctionHook(Prototy
 static std::unordered_map<std::wstring,std::vector<unsigned char>> testStorage;
 static int storageReads=0,storageWrites=0;static bool storageWritable=true;
 size_t Wh_GetBinaryValue(PCWSTR key,void* data,size_t capacity){++storageReads;auto found=testStorage.find(key);if(found==testStorage.end()||found->second.size()>capacity)return 0;std::memcpy(data,found->second.data(),found->second.size());return found->second.size();}
-BOOL Wh_SetBinaryValue(PCWSTR key,void const* data,size_t size){++storageWrites;if(!storageWritable)return FALSE;auto bytes=static_cast<unsigned char const*>(data);testStorage[key]=std::vector<unsigned char>(bytes,bytes+size);return TRUE;}
+BOOL Wh_SetBinaryValue(PCWSTR key,void const* data,size_t size){++storageWrites;if(!storageWritable||size>16383)return FALSE;auto bytes=static_cast<unsigned char const*>(data);testStorage[key]=std::vector<unsigned char>(bytes,bytes+size);return TRUE;}
 BOOL Wh_DeleteValue(PCWSTR key){return testStorage.erase(key)!=0;}
 
 namespace {
@@ -361,6 +361,12 @@ int Run()try{
   std::vector<winrt::com_ptr<TestMaterialBrush>> owners;g_searchSavedMaterials.count=0;
   for(int i=0;i<40;++i){auto owner=winrt::make_self<TestMaterialBrush>();owner->Attach(warm->Current());RememberSearchMaterial(owner.as<wuxm::XamlCompositionBrushBase>(),warm->Current(),original.graph);owners.push_back(owner);}
   Check(g_searchSavedMaterials.count==32,"continuity storage has a strict record bound");
+  g_searchSavedMaterialsDirty=true;SaveSearchMaterialStorage();
+  Check(!g_searchSavedMaterialsDirty,"all material entries fit portable per-value limits");
+  resetRuntime();LoadSearchMaterialStorage();
+  Check(g_searchSavedMaterials.count==32,"portable storage restores every captured material, not just the first two");
+  for(auto const& [key,value]:testStorage)Check(value.size()<=16383,"each serialized header or graph is portable-safe");
+
   const auto count=g_searchSavedMaterials.count;ForgetSavedSearchMaterial(owners.back().as<wf::IUnknown>(),true);
   Check(g_searchSavedMaterials.count==count-1,"observed XAML creation invalidates an old identity record");
   ForgetSavedSearchMaterial(warm->Current(),false);

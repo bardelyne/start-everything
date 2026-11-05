@@ -146,6 +146,7 @@
     "ResourcePackage": "Πακέτο πόρων",
     "PackageBundle": "Δέσμη πακέτων",
     "OptionalPackage": "Προαιρετικό πακέτο",
-    "AppSettings": "Ρυθμίσεις εφαρμογής"
+    "AppSettings": "Ρυθμίσεις εφαρμογής",
+    "CheckingPins": "Έλεγχος επιλογών καρφιτσώματος…"
   }
 }

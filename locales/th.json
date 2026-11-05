@@ -146,6 +146,7 @@
     "ResourcePackage": "แพ็กเกจทรัพยากร",
     "PackageBundle": "ชุดแพ็กเกจ",
     "OptionalPackage": "แพ็กเกจเสริม",
-    "AppSettings": "การตั้งค่าแอป"
+    "AppSettings": "การตั้งค่าแอป",
+    "CheckingPins": "กำลังตรวจสอบตัวเลือกการปักหมุด…"
   }
 }

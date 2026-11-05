@@ -146,6 +146,7 @@
     "ResourcePackage": "リソースパッケージ",
     "PackageBundle": "パッケージバンドル",
     "OptionalPackage": "オプションパッケージ",
-    "AppSettings": "アプリの設定"
+    "AppSettings": "アプリの設定",
+    "CheckingPins": "ピン留めの選択肢を確認中…"
   }
 }

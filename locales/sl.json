@@ -146,6 +146,7 @@
     "ResourcePackage": "Paket virov",
     "PackageBundle": "Zbirka paketov",
     "OptionalPackage": "Izbirni paket",
-    "AppSettings": "Nastavitve aplikacije"
+    "AppSettings": "Nastavitve aplikacije",
+    "CheckingPins": "Preverjanje možnosti pripenjanja…"
   }
 }

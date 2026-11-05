@@ -146,6 +146,7 @@
     "ResourcePackage": "Kaynak paketi",
     "PackageBundle": "Paket grubu",
     "OptionalPackage": "İsteğe bağlı paket",
-    "AppSettings": "Uygulama ayarları"
+    "AppSettings": "Uygulama ayarları",
+    "CheckingPins": "Sabitleme seçenekleri denetleniyor…"
   }
 }

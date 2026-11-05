@@ -146,6 +146,7 @@
     "ResourcePackage": "Ressurspakke",
     "PackageBundle": "Pakkesamling",
     "OptionalPackage": "Valgfri pakke",
-    "AppSettings": "Appinnstillinger"
+    "AppSettings": "Appinnstillinger",
+    "CheckingPins": "Kontrollerer festealternativer…"
   }
 }

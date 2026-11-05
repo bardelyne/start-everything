@@ -146,6 +146,7 @@
     "ResourcePackage": "Пакет со ресурси",
     "PackageBundle": "Збирка пакети",
     "OptionalPackage": "Изборен пакет",
-    "AppSettings": "Поставки за апликацијата"
+    "AppSettings": "Поставки за апликацијата",
+    "CheckingPins": "Проверка на опциите за прикачување…"
   }
 }

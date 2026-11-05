@@ -146,6 +146,7 @@
     "ResourcePackage": "Resursu pakotne",
     "PackageBundle": "Pakotņu kopa",
     "OptionalPackage": "Neobligāta pakotne",
-    "AppSettings": "Programmas iestatījumi"
+    "AppSettings": "Programmas iestatījumi",
+    "CheckingPins": "Tiek pārbaudītas piespraušanas iespējas…"
   }
 }

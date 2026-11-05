@@ -148,6 +148,29 @@ void ShortcutFixture(){
     remaining=100;
     Check(shellactions::FindShortcutIn(root,identity,L"C:\\Unrelated.exe",remaining,fallback,17).empty()&&remaining==100,
         "the shortcut scan honors its directory-depth bound");
+    // A small reserved stack catches the former 64 KB-per-frame recursion.
+    std::vector<std::wstring> folders;
+    std::wstring deep = root;
+    for (int i = 0; i < 16; ++i) {
+        deep += L"\\d";
+        Check(CreateDirectoryW(deep.c_str(), nullptr), "create a private deep shortcut-tree fixture");
+        folders.push_back(deep);
+    }
+    struct DeepScan { std::wstring root; bool complete = false; } scan{folders.front()};
+    HANDLE thread = CreateThread(nullptr, 128 * 1024, [](void* data) -> DWORD {
+        auto& scan = *static_cast<DeepScan*>(data);
+        size_t remaining = 4096;
+        std::wstring fallback;
+        shellactions::FindShortcutIn(scan.root, L"missing", L"C:\\Missing.exe", remaining, fallback);
+        scan.complete = true;
+        return 0;
+    }, &scan, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    Check(thread != nullptr, "create a private scan with a 128 KB stack reserve");
+    Check(WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0 && scan.complete,
+          "sixteen recursive folder levels finish safely on a small stack");
+    CloseHandle(thread);
+    for (auto it = folders.rbegin(); it != folders.rend(); ++it)
+        Check(RemoveDirectoryW(it->c_str()), "remove only the private nested scan directories");
 }
 int main(int argc,char**) {
     setvbuf(stdout,nullptr,_IONBF,0);winrt::init_apartment(winrt::apartment_type::single_threaded);

@@ -146,6 +146,7 @@
     "ResourcePackage": "వనరుల ప్యాకేజీ",
     "PackageBundle": "ప్యాకేజీల సమూహం",
     "OptionalPackage": "ఐచ్ఛిక ప్యాకేజీ",
-    "AppSettings": "యాప్ సెట్టింగ్‌లు"
+    "AppSettings": "యాప్ సెట్టింగ్‌లు",
+    "CheckingPins": "పిన్ చేసే ఎంపికలను తనిఖీ చేస్తోంది…"
   }
 }

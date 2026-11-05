@@ -129,11 +129,15 @@ int main() try {
     Check(!GetPropW(hwnd,kStartTextEditingProperty)&&!g_startTextFocusWindow,"foreign-thread teardown revokes through the owning UI thread");
     ObserveStartTextFocus(hwnd);g_quit=true;
     const auto owner=g_startTextFocusThread.load();
-    std::thread stalledCleanup([hwnd]{StopStartTextFocus(hwnd);});stalledCleanup.join();
-    Check(!GetPropW(hwnd,kStartTextEditingProperty) && g_startTextFocusThread==owner,
-          "unresponsive UI fallback clears the guard without revoking from the wrong thread");
+    cleanupDone=false;
+    std::thread stalledCleanup([hwnd,&cleanupDone]{StopStartTextFocus(hwnd);cleanupDone=true;});
+    Sleep(1200); // Longer than the former timeout, with the UI deliberately busy.
+    Check(!cleanupDone && g_startTextFocusThread==owner,"slow owning UI delays teardown without pinning a second mod copy");
+    while(!cleanupDone){Pump();Sleep(1);}stalledCleanup.join();
+    Check(!GetPropW(hwnd,kStartTextEditingProperty) && !g_startTextFocusWindow && !g_startTextFocusThread,
+          "delayed UI teardown revokes every delegate on the owning thread");
     button.Focus(wux::FocusState::Programmatic);rename.Focus(wux::FocusState::Programmatic);Pump();
-    Check(!GetPropW(hwnd,kStartTextEditingProperty),"retained callbacks remain inert during shutdown");
+    Check(!GetPropW(hwnd,kStartTextEditingProperty),"shutdown leaves no retained focus callbacks");
     StopStartTextFocus(hwnd);g_quit=false;
     StopStartTextFocus(hwnd);g_quit=true;ObserveStartTextFocus(hwnd);Pump();
     Check(!GetPropW(hwnd,kStartTextEditingProperty),"shutdown cannot republish an editor flag");

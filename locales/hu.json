@@ -146,6 +146,7 @@
     "ResourcePackage": "Erőforráscsomag",
     "PackageBundle": "Csomagköteg",
     "OptionalPackage": "Választható csomag",
-    "AppSettings": "Alkalmazásbeállítások"
+    "AppSettings": "Alkalmazásbeállítások",
+    "CheckingPins": "Rögzítési lehetőségek ellenőrzése…"
   }
 }

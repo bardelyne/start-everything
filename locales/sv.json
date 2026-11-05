@@ -146,6 +146,7 @@
     "ResourcePackage": "Resurspaket",
     "PackageBundle": "Paketsamling",
     "OptionalPackage": "Valfritt paket",
-    "AppSettings": "Appinställningar"
+    "AppSettings": "Appinställningar",
+    "CheckingPins": "Kontrollerar fästalternativ…"
   }
 }

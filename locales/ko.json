@@ -146,6 +146,7 @@
     "ResourcePackage": "리소스 패키지",
     "PackageBundle": "패키지 번들",
     "OptionalPackage": "선택적 패키지",
-    "AppSettings": "앱 설정"
+    "AppSettings": "앱 설정",
+    "CheckingPins": "고정 옵션 확인 중…"
   }
 }

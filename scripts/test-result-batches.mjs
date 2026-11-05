@@ -8,9 +8,10 @@ const output=process.argv[2]||fs.mkdtempSync(path.join(os.tmpdir(),'start-result
 fs.mkdirSync(output,{recursive:true});
 const source=fs.readFileSync(path.join(root,'start-everything.wh.cpp'),'utf8');
 function part(first,last){const a=source.indexOf(first),b=source.indexOf(last,a+first.length);if(a<0||b<0)throw Error(first);return source.slice(a,b);}
+const common=source.slice(source.indexOf('// <search-text>'),source.indexOf('// </search-text>'));
 let code=fs.readFileSync(path.join(root,'tests/result-batches.cpp'),'utf8')
  .replace('// PRODUCTION_BATCH_SIZES',part('inline constexpr size_t kInstalledBatchSize=','std::wstring g_installedBatchQuery;'))
- .replace('// PRODUCTION_EVERYTHING',part('namespace everything {','}  // namespace everything')+'}\n')
+ .replace('// PRODUCTION_EVERYTHING',common+part('namespace everything {','}  // namespace everything')+'}\n')
  .replace('// PRODUCTION_RANKER',part('namespace filefilter {','}  // namespace filefilter')+'}\n')
  .replace('// PRODUCTION_PAGES',part('// <file-result-pages>','// </file-result-pages>'))
  .replace('// PRODUCTION_BATCHES',part('struct FileSearchRequest {','// Publish only the current request.'));

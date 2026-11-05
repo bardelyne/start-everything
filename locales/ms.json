@@ -146,6 +146,7 @@
     "ResourcePackage": "Pakej sumber",
     "PackageBundle": "Himpunan pakej",
     "OptionalPackage": "Pakej pilihan",
-    "AppSettings": "Tetapan aplikasi"
+    "AppSettings": "Tetapan aplikasi",
+    "CheckingPins": "Menyemak pilihan pin…"
   }
 }

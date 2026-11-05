@@ -146,6 +146,7 @@
     "ResourcePackage": "Pakiet zasobów",
     "PackageBundle": "Zestaw pakietów",
     "OptionalPackage": "Pakiet opcjonalny",
-    "AppSettings": "Ustawienia aplikacji"
+    "AppSettings": "Ustawienia aplikacji",
+    "CheckingPins": "Sprawdzanie opcji przypinania…"
   }
 }

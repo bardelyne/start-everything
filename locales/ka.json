@@ -146,6 +146,7 @@
     "ResourcePackage": "რესურსების პაკეტი",
     "PackageBundle": "პაკეტების ნაკრები",
     "OptionalPackage": "არასავალდებულო პაკეტი",
-    "AppSettings": "აპის პარამეტრები"
+    "AppSettings": "აპის პარამეტრები",
+    "CheckingPins": "ჩამაგრების პარამეტრების შემოწმება…"
   }
 }

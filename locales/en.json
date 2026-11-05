@@ -146,6 +146,7 @@
     "ResourcePackage": "Resource package",
     "PackageBundle": "Package bundle",
     "OptionalPackage": "Optional package",
-    "AppSettings": "App settings"
+    "AppSettings": "App settings",
+    "CheckingPins": "Checking pins…"
   }
 }

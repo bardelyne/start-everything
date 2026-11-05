@@ -49,13 +49,15 @@ void Dataset(unsigned count) {
 
 static bool legacyOnly=false;
 static DWORD observedOffset=0,observedLimit=0,observedMessage=0;
-static DWORD observedSort=0,windowSort=20,historyCalls=0;
+static DWORD observedSort=0,windowSort=20,historyCalls=0,preferenceReads=0,fastSortReads=0;
+static bool fastSort=true;
 static std::wstring openedPath;
 LRESULT CALLBACK SortProvider(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
-    if(message==WM_USER && w==510)return windowSort;
+    if(message==WM_USER && w==510){++preferenceReads;return windowSort;}
     return DefWindowProcW(hwnd,message,w,l);
 }
 LRESULT CALLBACK Provider(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
+    if(message==WM_USER && w==410){++fastSortReads;return fastSort?1:0;}
     if(message!=WM_COPYDATA)return DefWindowProcW(hwnd,message,w,l);
     const auto& cds=*reinterpret_cast<const COPYDATASTRUCT*>(l);
     if(cds.dwData==24) {
@@ -196,6 +198,20 @@ int main() {
     Check(all.size()==300&&reads.size()==3&&reads[1].query.find(L"!path:")!=std::wstring::npos&&
           reads[2].query==reads[1].query&&reads[2].offset==200,"continuation keeps the selected filtered query and its exact cursor");
 
+    Dataset(450);
+    for(size_t i=0;i<400;++i)dataset[i].path=L"C:\\AppData\\Local\\Packages\\Cache";
+    pages.Reset(L"",true,{L"\\appdata\\local\\packages\\"});added.clear();
+    Check(pages.Take(20,&added,Fetch,[]{return current;})&&reads.size()==3&&added.size()==20,
+          "entirely excluded multi-folder pages are skipped until a clean page appears");
+    Check(std::all_of(added.begin(),added.end(),[](auto const& item){return item.path==L"C:\\Files";}),
+          "a page containing only excluded paths never bypasses filtering");
+    Dataset(1000);for(auto& item:dataset)item.path=L"C:\\КЭШ\\ДАННЫЕ";
+    pages.Reset(L"",true,{filefilter::ToLower(L"\\КЭШ\\ДАННЫЕ\\")});added.clear();
+    Check(pages.Take(20,&added,Fetch,[]{return current;})&&added.empty()&&pages.More()&&reads.size()==4,
+          "Unicode exclusions keep a fully noisy batch empty with bounded provider reads");
+    Check(pages.Take(20,&added,Fetch,[]{return current;})&&added.empty()&&!pages.More()&&pages.Total()==0,
+          "terminal filtered count is exact even when every provider item is excluded");
+
     g_appsBatch.Begin(7,6);g_appsBatch.Complete(6,true);
     g_filesBatch.Begin(7,12);g_filesBatch.Complete(12,true);
     g_fileTemplate=FileSearchRequest{7,L"files",true,12,false,{}};
@@ -220,8 +236,24 @@ int main() {
     Check(RegisterClassW(&sortClass)!=0,"private sort-window class registers");
     HWND sortWindow=CreateWindowExW(0,sortClass.lpszClassName,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,wc.hInstance,nullptr);
     Check(sortWindow && everything::preferences::PreferredSort(provider)==20,"public GET_SORT reads the matching process's current sort");
-    windowSort=14;
+    windowSort=14;everything::RefreshSortPreferences();
     Check(everything::preferences::PreferredSort(provider)==14,"changing the native window's order is observed on the next query");
+    {
+        everything::Client sortClient;Check(sortClient.Init(),"private client initializes for session preference caching");
+        everything::RefreshSortPreferences();
+        Check(sortClient.PreferredSort()==14,"a fresh search session reads the native sort");
+        const auto sortReads=preferenceReads,fastReads=fastSortReads;
+        for(int i=0;i<100;++i)Check(sortClient.PreferredSort()==14,"typing reuses the search session sort");
+        Check(preferenceReads==sortReads&&fastSortReads==fastReads,"typing performs no repeated sort IPC or INI lookups");
+        windowSort=20;
+        Check(sortClient.PreferredSort()==14,"a live search keeps its frozen sort until reopening");
+        everything::RefreshSortPreferences();
+        Check(sortClient.PreferredSort()==20,"reopening search refreshes Everything's current choice");
+        fastSort=false;windowSort=14;everything::RefreshSortPreferences();
+        Check(sortClient.PreferredSort()==1,"non-fast broad sorts fall back to native name order instead of timing out");
+        fastSort=true;everything::RefreshSortPreferences();
+        Check(sortClient.PreferredSort()==14,"available fast sort restores the user's order on the next session");
+    }
     windowSort=99;
     Check(everything::preferences::PreferredSort(provider)==1,"unsupported native sort values fall back safely");
     DestroyWindow(sortWindow);UnregisterClassW(sortClass.lpszClassName,wc.hInstance);
@@ -245,7 +277,10 @@ int main() {
               "empty-query IPC requests Everything's selected sort and only the initial batch");
         Check(client.QueryPage(L"files",20,200,&reply,&total,14)&&observedSort==14&&observedOffset==200,
               "later pages carry the frozen query's native sort");
-        everything::RecordFileOpen(L"C:\\Files\\unknown-setting.txt");
+        everything::RecordFileOpen(L"C:\\Files\\off.txt");
+    Check(historyCalls==0,"file opens leave Everything history untouched by default");
+    everything::g_recordRunHistory=true;
+    everything::RecordFileOpen(L"C:\\Files\\unknown-setting.txt");
         Check(historyCalls==0,"unavailable history preferences cannot enable local history implicitly");
         const auto settings=everything::preferences::SettingsFile(provider);
         Check(!settings.empty() && GetFileAttributesW(settings.c_str())==INVALID_FILE_ATTRIBUTES,

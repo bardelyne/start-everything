@@ -146,6 +146,7 @@
     "ResourcePackage": "Пакет ресурсів",
     "PackageBundle": "Набір пакетів",
     "OptionalPackage": "Додатковий пакет",
-    "AppSettings": "Параметри програми"
+    "AppSettings": "Параметри програми",
+    "CheckingPins": "Перевірка варіантів закріплення…"
   }
 }

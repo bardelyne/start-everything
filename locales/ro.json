@@ -146,6 +146,7 @@
     "ResourcePackage": "Pachet de resurse",
     "PackageBundle": "Colecție de pachete",
     "OptionalPackage": "Pachet opțional",
-    "AppSettings": "Setări aplicație"
+    "AppSettings": "Setări aplicație",
+    "CheckingPins": "Se verifică opțiunile de fixare…"
   }
 }

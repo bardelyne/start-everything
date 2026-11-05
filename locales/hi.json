@@ -146,6 +146,7 @@
     "ResourcePackage": "संसाधन पैकेज",
     "PackageBundle": "पैकेज बंडल",
     "OptionalPackage": "वैकल्पिक पैकेज",
-    "AppSettings": "ऐप सेटिंग्स"
+    "AppSettings": "ऐप सेटिंग्स",
+    "CheckingPins": "पिन करने के विकल्प जाँचे जा रहे हैं…"
   }
 }

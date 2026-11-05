@@ -146,6 +146,7 @@
     "ResourcePackage": "Hulpbronpakket",
     "PackageBundle": "Pakketbundel",
     "OptionalPackage": "Opsionele pakket",
-    "AppSettings": "Toepassinginstellings"
+    "AppSettings": "Toepassinginstellings",
+    "CheckingPins": "Vasspeldopsies word nagegaan…"
   }
 }

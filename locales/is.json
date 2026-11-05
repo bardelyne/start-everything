@@ -146,6 +146,7 @@
     "ResourcePackage": "Tilfangapakki",
     "PackageBundle": "Pakkasafn",
     "OptionalPackage": "Valfrjáls pakki",
-    "AppSettings": "Stillingar forrits"
+    "AppSettings": "Stillingar forrits",
+    "CheckingPins": "Athuga festingar…"
   }
 }

@@ -146,6 +146,7 @@
     "ResourcePackage": "Paket sumber daya",
     "PackageBundle": "Bundel paket",
     "OptionalPackage": "Paket opsional",
-    "AppSettings": "Pengaturan aplikasi"
+    "AppSettings": "Pengaturan aplikasi",
+    "CheckingPins": "Memeriksa opsi penyematan…"
   }
 }

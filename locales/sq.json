@@ -146,6 +146,7 @@
     "ResourcePackage": "Paketë burimesh",
     "PackageBundle": "Grup paketash",
     "OptionalPackage": "Paketë opsionale",
-    "AppSettings": "Cilësimet e aplikacionit"
+    "AppSettings": "Cilësimet e aplikacionit",
+    "CheckingPins": "Po kontrollohen mundësitë e fiksimit…"
   }
 }

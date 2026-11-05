@@ -146,6 +146,7 @@
     "ResourcePackage": "Paket resursa",
     "PackageBundle": "Skup paketa",
     "OptionalPackage": "Neobavezni paket",
-    "AppSettings": "Postavke aplikacije"
+    "AppSettings": "Postavke aplikacije",
+    "CheckingPins": "Provjera mogućnosti prikvačivanja…"
   }
 }

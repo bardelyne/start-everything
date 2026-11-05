@@ -146,6 +146,7 @@
     "ResourcePackage": "Pakete ng resource",
     "PackageBundle": "Kalipunan ng mga pakete",
     "OptionalPackage": "Opsyonal na pakete",
-    "AppSettings": "Mga setting ng app"
+    "AppSettings": "Mga setting ng app",
+    "CheckingPins": "Sinusuri ang mga opsyon sa pag-pin…"
   }
 }

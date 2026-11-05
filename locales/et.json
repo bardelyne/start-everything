@@ -146,6 +146,7 @@
     "ResourcePackage": "Ressursipakett",
     "PackageBundle": "Paketikogum",
     "OptionalPackage": "Valikuline pakett",
-    "AppSettings": "Rakenduse sätted"
+    "AppSettings": "Rakenduse sätted",
+    "CheckingPins": "Kinnitamisvalikute kontrollimine…"
   }
 }

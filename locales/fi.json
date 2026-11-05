@@ -146,6 +146,7 @@
     "ResourcePackage": "Resurssipaketti",
     "PackageBundle": "Pakettikokoelma",
     "OptionalPackage": "Valinnainen paketti",
-    "AppSettings": "Sovelluksen asetukset"
+    "AppSettings": "Sovelluksen asetukset",
+    "CheckingPins": "Tarkistetaan kiinnitysvaihtoehtoja…"
   }
 }

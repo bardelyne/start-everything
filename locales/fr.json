@@ -146,6 +146,7 @@
     "ResourcePackage": "Paquet de ressources",
     "PackageBundle": "Ensemble de paquets",
     "OptionalPackage": "Paquet facultatif",
-    "AppSettings": "Paramètres de l’application"
+    "AppSettings": "Paramètres de l’application",
+    "CheckingPins": "Vérification des options d’épinglage…"
   }
 }
