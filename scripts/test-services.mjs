@@ -14,6 +14,9 @@ for(const [key,value] of Object.entries({
  COMMANDS:part('namespace commands {','}  // namespace commands')+'}\n',
  MODEL:part('struct WeatherDayRow {','// Icons take 24 logical pixels'),
  BASE64:part('std::wstring EncodePowerShellCommand(','std::wstring ExpandCustomShellEnvironment('),
+ BATCH_SIZES:part('inline constexpr size_t kInstalledBatchSize=','std::wstring g_installedBatchQuery;'),
+ BATCHES:part('struct ResultBatch {','bool RequestMoreFiles('),
+ PUBLISH:part('bool PublishAppResults(','bool PublishFileResults('),
  SERVICES:part('namespace services {\nstruct Entry','}  // namespace services')+'}\n',
 }))code=code.replace('// PRODUCTION_'+key,value);
 const cpp=path.join(output,'services.cpp'),exe=path.join(output,'services.exe');fs.writeFileSync(cpp,code);

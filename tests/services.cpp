@@ -30,10 +30,16 @@ enum class CustomCommandShell { Cmd };
 // PRODUCTION_MODEL
 // PRODUCTION_BASE64
 namespace tools {std::wstring ToLower(std::wstring value){std::transform(value.begin(),value.end(),value.begin(),towlower);return value;}}
-std::mutex g_queryMutex;
+std::mutex g_queryMutex,g_resultsMutex;
+std::condition_variable g_queryWake;
+std::atomic<bool> g_queryDirty{false};
+std::wstring g_pendingQuery=L"/services",g_appsQuery;
+uint64_t g_appsRevision=0,g_appsContentRevision=0;
 std::atomic<bool> g_searchQuit{false};uint64_t g_queryRevision=42;
 std::vector<Row> g_appRows;std::atomic<int> renders{0};
-bool PublishAppResults(uint64_t revision,const std::wstring&,std::vector<Row> rows){std::lock_guard lock(g_queryMutex);if(g_searchQuit || revision!=g_queryRevision)return false;g_appRows=std::move(rows);return true;}
+// PRODUCTION_BATCH_SIZES
+// PRODUCTION_BATCHES
+// PRODUCTION_PUBLISH
 void RequestRender(){++renders;}
 void Wh_Log(const wchar_t*,...){}
 namespace services {enum class Action {Start,Stop,Restart};}
@@ -122,7 +128,46 @@ int main(int argc,char** argv){
     rows=services::Rows(L"running",20,entries,true,0,false,{});
     Check(rows.size()==2 && rows[0].serviceState==SERVICE_RUNNING,"running filter excludes stopped and paused services");
     Check(services::Rows(L"stopped",20,entries,true,0,false,{}).size()==1,"stopped filter works locally");
-    Check(services::Rows(L"",1,entries,true,0,false,{}).size()==1,"service results obey the app panel limit");
+    Check(services::Rows(L"",1,entries,true,0,false,{}).size()==1,"service results obey the requested batch size");
+    std::vector<services::Entry> many;
+    for(int i=0;i<165;++i) {
+        const auto name=L"Fixture"+std::to_wstring(1000+i);
+        many.push_back({name,name,L"Fixture description",static_cast<DWORD>(i%2?SERVICE_RUNNING:SERVICE_STOPPED),
+                        SERVICE_ACCEPT_STOP,static_cast<DWORD>(i)});
+    }
+    g_appsBatch.Begin(42,20);
+    size_t prior=0;
+    std::vector<std::wstring> identities;
+    while(true) {
+        const auto requested=g_appsBatch.requested;
+        auto batch=services::Rows(L"",requested+1,many,true,0,false,{});
+        const bool more=batch.size()>requested;
+        if(more)batch.resize(requested);
+        for(size_t i=0;i<identities.size();++i)
+            Check(batch[i].serviceName==identities[i],"appending services preserves the existing prefix and targets");
+        identities.clear();
+        for(const auto& row:batch)identities.push_back(row.serviceName);
+        Check(PublishAppResults(42,L"/services",std::move(batch),more,requested),
+              "current service batch publishes through the production guard");
+        Check(g_appRows.size()==std::min(requested,many.size()),"service batch grows beyond the former 100-row cap");
+        if(!more)break;
+        prior=g_appRows.size();
+        Check(RequestMoreApps(L"/services",prior,42),"near-end scrolling requests another service batch");
+        Check(g_appsBatch.requested==requested+40 && g_queryDirty,"each scroll adds 40 on the worker without changing the query revision");
+        Check(!RequestMoreApps(L"/services",prior,42),"duplicate scroll events do not stack pending requests");
+        Check(!PublishAppResults(42,L"/services",g_appRows,true,requested),
+              "a live refresh of the previous smaller batch cannot overwrite the new scrolling request");
+        Check(g_appsBatch.pending && g_appRows.size()==prior,"rejecting a stale refresh preserves visible rows and the pending request");
+    }
+    Check(g_appRows.size()==165 && !g_appsBatch.more,"every matching service can be reached and the last partial batch marks the end");
+    Check(!RequestMoreApps(L"/services",165,42),"scrolling at the end does not schedule more service work");
+    auto runningRows=services::Rows(L"running",200,many,true,0,false,{});
+    Check(runningRows.size()==82 && std::all_of(runningRows.begin(),runningRows.end(),[](const auto& row){return row.serviceState==SERVICE_RUNNING;}),
+          "service state filters apply before pagination");
+    Check(services::Rows(L"fixture1164",20,many,true,0,false,{})[0].serviceName==L"Fixture1164",
+          "filtering can find a service beyond the initially visible pages");
+    Check(!PublishAppResults(41,L"/services",{},false,20),"an old query cannot publish service results");
+    g_appsBatch={};g_appsBatch.Begin(42,20);g_appRows.clear();
     const auto noMatch=services::Rows(L"not found",20,entries,true,0,false,{})[0];
     Check(noMatch.infoOnly && noMatch.serviceName.empty() && noMatch.title==L"No matching services","no-match row has a service-specific message and no operation target");
     Check(services::Rows(L"",20,{},false,0,false,{})[0].title==L"Loading…","initial query can render before enumeration");
@@ -154,7 +199,24 @@ int main(int argc,char** argv){
     services::Visible(true);services::Schedule(L"/services",L"",42,20);
     for(int i=0;i<200 && !renders.load();++i)std::this_thread::sleep_for(std::chrono::milliseconds(10));
     Check(renders.load()>0,"service enumeration publishes asynchronously");
-    {std::lock_guard lock(g_queryMutex);Check(!g_appRows.empty() && !g_appRows.front().serviceName.empty(),"worker publishes actionable service cards");++g_queryRevision;}
+    {std::scoped_lock lock(g_queryMutex,g_resultsMutex);Check(!g_appRows.empty() && !g_appRows.front().serviceName.empty(),"worker publishes actionable service cards");}
+    const auto visible=std::min(size_t(20),live.size());
+    if(live.size()>visible) {
+        Check(RequestMoreApps(L"/services",visible,42),"a live service list can request its next scroll batch");
+        const auto expanded=std::min(size_t(60),live.size());
+        services::Schedule(L"/services",L"",42,60);
+        bool ready=false;
+        for(int i=0;i<200 && !ready;++i) {
+            {std::scoped_lock lock(g_queryMutex,g_resultsMutex);ready=g_appRows.size()==expanded;}
+            if(!ready)std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        Check(ready,"the actual service worker publishes the expanded batch without typing again");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+        {std::scoped_lock lock(g_queryMutex,g_resultsMutex);
+         Check(g_appRows.size()==expanded && g_appsBatch.published==expanded && !g_appsBatch.pending,
+               "the periodic live service refresh preserves all loaded rows");}
+    }
+    {std::lock_guard lock(g_queryMutex);++g_queryRevision;}
     services::Visible(false);services::Wake();const auto old=renders.load();
     std::this_thread::sleep_for(std::chrono::milliseconds(120));
     Check(renders.load()==old,"hidden or stale requests cannot overwrite the app panel");

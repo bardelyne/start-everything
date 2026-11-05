@@ -194,7 +194,15 @@ void Wake(){}
 }
 namespace services {
 std::atomic<int> requests{0};
-std::vector<Row> Initial(const std::wstring&,size_t){Row row;row.title=L"services";return {row};}
+std::vector<Row> Initial(const std::wstring& args,size_t limit){
+    if(args!=L"paged"){Row row;row.title=L"services";return {row};}
+    std::vector<Row> rows;
+    for(size_t i=0;i<std::min(limit,size_t(165));++i) {
+        Row row;row.title=L"Service "+std::to_wstring(i);row.serviceName=row.title;
+        row.cardSignature=row.title;rows.push_back(std::move(row));
+    }
+    return rows;
+}
 void Schedule(std::wstring,std::wstring,uint64_t,size_t){++requests;}
 void Wake(){}
 }
@@ -483,8 +491,24 @@ int main() {
     Check(Apps(serviceRevision) && Files(serviceRevision),"services command publishes without waiting for file results");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows[0].title==L"services" && seenFiles.back().rows.empty(),"service cards replace apps and keep file searches off");}
     Check(services::requests.load()==1,"service enumeration is scheduled on its own worker");
+    const auto pagedServices=Queue(L"/services paged");
+    Check(Apps(pagedServices) && Files(pagedServices),"paged services publish independently of files");
+    {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==20 && seenFiles.back().rows.empty(),
+          "the service list starts with the normal viewport batch");}
+    for(size_t count:{20u,60u,100u,140u}) {
+        Check(RequestMoreApps(L"/services paged",count,pagedServices),"service scrolling uses the shared app batch loader");
+        std::unique_lock lock(observedMutex);
+        Check(observedWake.wait_for(lock,2s,[&]{return seenApps.back().rows.size()==std::min(count+40,size_t(165));}),
+              "service pagination appends 40 and reaches the final partial batch");
+        for(size_t i=0;i<seenApps.back().rows.size();++i)
+            Check(seenApps.back().rows[i].serviceName==L"Service "+std::to_wstring(i),
+                  "service pagination retains all earlier row targets without duplication");
+    }
+    Check(!RequestMoreApps(L"/services paged",165,pagedServices),"service pagination stops after the last matching row");
+    {std::lock_guard lock(g_queryMutex);Check(g_queryRevision==pagedServices,"service pagination keeps the typed query revision");}
     const auto suiteRevision=Queue(L"suite");
     Check(Apps(suiteRevision) && Files(suiteRevision),"normal installed-only matching completes promptly");
+    const int serviceRequestsAfterPaging=services::requests.load();
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.empty(),"installed-only products are excluded from normal app search");}
     const auto inventoryRevision=Queue(L"/all suite");
     Check(Apps(inventoryRevision) && Files(inventoryRevision),"installed inventory publishes without waiting for file results");
@@ -535,7 +559,7 @@ int main() {
     const auto customConflict=Queue(L"/services audio");
     Check(Apps(customConflict) && Files(customConflict),"custom and tool name collision publishes promptly");
     {std::lock_guard lock(observedMutex);Check(seenApps.back().rows.size()==1 && seenApps.back().rows[0].isError && seenFiles.back().rows.empty(),"custom slash collision shows only an error and clears file results");}
-    Check(services::requests.load()==1,"conflicting tool does not schedule any service collection");
+    Check(services::requests.load()==serviceRequestsAfterPaging,"conflicting tool does not schedule any service collection");
     {std::lock_guard lock(g_settingsMutex);g_settings.customCommands.clear();}
     const auto hidden = Queue(L"Alpha");
     Check(Apps(hidden) && Files(hidden), "apps work with the file panel disabled");
